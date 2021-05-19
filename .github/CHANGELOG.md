@@ -101,6 +101,7 @@
 1. [AP] Fixed CLB not engaging correctly on take-off - @aguther (Andreas Guther)
 1. [AP] Added time delay to ALT condition - @aguther (Andreas Guther)
 1. [LIGHTS] Add external PARK BRK LT - @bouveng (Johan Bouveng)
+1. [MCDU] Added support for connecting MCDU to external devices - @tyler58546 (tyler58546)
 
 ## 0.7.0
 
