@@ -1,5 +1,6 @@
 import { Geometry } from '@fmgc/guidance/Geometry';
-import { VerticalProfileComputationParameters, VerticalProfileComputationParametersObserver } from '@fmgc/guidance/vnav/VerticalProfileComputationParameters';
+import { VerticalProfileComputationParametersObserver } from '@fmgc/guidance/vnav/VerticalProfileComputationParameters';
+import { VerticalMode } from '@shared/autopilot';
 import { EngineModel } from '../EngineModel';
 import { FlapConf } from '../common';
 import { Predictions, StepResults } from '../Predictions';
@@ -8,6 +9,14 @@ import { AtmosphericConditions } from '../AtmosphericConditions';
 
 export class ClimbPathBuilder {
     private static TONS_TO_POUNDS = 2240;
+
+    private verticalModesToComputeProfileFor: VerticalMode[] = [
+        VerticalMode.ALT_CPT,
+        VerticalMode.ALT_CST_CPT,
+        VerticalMode.CLB,
+        VerticalMode.OP_CLB,
+        VerticalMode.VS,
+    ]
 
     private atmosphericConditions: AtmosphericConditions = new AtmosphericConditions();
 
@@ -23,7 +32,7 @@ export class ClimbPathBuilder {
         const { fcuVerticalMode } = this.computationParametersObserver.get();
 
         if (!isOnGround) {
-            if (fcuVerticalMode === 11 || fcuVerticalMode === 22) {
+            if (this.verticalModesToComputeProfileFor.includes(fcuVerticalMode)) {
                 this.computeLivePrediction(profile);
             }
 
@@ -327,7 +336,7 @@ export class ClimbPathBuilder {
         });
     }
 
-    private findMaxSpeedAtDistanceAlongTrack(profile: GeometryProfile, distanceAlongTrack: NauticalMiles): Knots {
+    findMaxSpeedAtDistanceAlongTrack(profile: GeometryProfile, distanceAlongTrack: NauticalMiles): Knots {
         let maxSpeed = Infinity;
 
         for (const constraint of profile.maxSpeedConstraints) {

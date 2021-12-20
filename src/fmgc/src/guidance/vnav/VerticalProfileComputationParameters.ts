@@ -8,6 +8,9 @@ export interface VerticalProfileComputationParameters {
     fcuAltitude: Feet,
     fcuVerticalMode: VerticalMode,
     fcuLateralMode: LateralMode,
+    fcuVerticalSpeed: FeetPerMinute,
+    fcuFlightPathAngle: Degrees,
+    fcuSpeed: Knots | Mach,
 
     zeroFuelWeight: number, // pounds
     fuelOnBoard: number, // pounds
@@ -20,6 +23,7 @@ export interface VerticalProfileComputationParameters {
     thrustReductionAltitude: Feet,
     cruiseAltitude: Feet,
     speedLimit: SpeedLimit,
+    flightPhase: FlightPhase
 }
 
 export class VerticalProfileComputationParametersObserver {
@@ -36,6 +40,9 @@ export class VerticalProfileComputationParametersObserver {
             fcuAltitude: Simplane.getAutoPilotDisplayedAltitudeLockValue(),
             fcuVerticalMode: SimVar.GetSimVarValue('L:A32NX_FMA_VERTICAL_MODE', 'Enum'),
             fcuLateralMode: SimVar.GetSimVarValue('L:A32NX_FMA_LATERAL_MODE', 'Enum'),
+            fcuVerticalSpeed: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_VS_SELECTED', 'Feet per minute'),
+            fcuFlightPathAngle: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_FPA_SELECTED', 'Degrees'),
+            fcuSpeed: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_SPEED_SELECTED', 'number'),
 
             zeroFuelWeight: this.fmgc.getZeroFuelWeight(),
             fuelOnBoard: this.fmgc.getFOB(),
@@ -51,6 +58,7 @@ export class VerticalProfileComputationParametersObserver {
                 underAltitude: 10000,
                 speed: 250,
             },
+            flightPhase: this.fmgc.getFlightPhase(),
         };
     }
 

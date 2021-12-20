@@ -27,6 +27,7 @@ export interface Fmgc {
     getAccelerationAltitude(): Feet,
     getThrustReductionAltitude(): Feet,
     getCruiseAltitude(): Feet,
+    getFlightPhase(): FlightPhase,
 }
 
 export class GuidanceController {
