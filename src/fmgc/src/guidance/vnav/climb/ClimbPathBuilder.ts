@@ -8,7 +8,7 @@ import { GeometryProfile, VerticalCheckpointReason } from '../GeometryProfile';
 import { AtmosphericConditions } from '../AtmosphericConditions';
 
 export class ClimbPathBuilder {
-    private static TONS_TO_POUNDS = 2240;
+    private static TONS_TO_POUNDS = 2204.62;
 
     private verticalModesToComputeProfileFor: VerticalMode[] = [
         VerticalMode.ALT_CPT,

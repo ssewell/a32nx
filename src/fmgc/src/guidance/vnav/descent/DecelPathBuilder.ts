@@ -55,6 +55,7 @@ export class DecelPathBuilder {
 
         const vappSegment = DecelPathBuilder.computeVappSegment(profile.geometry);
 
+        let timeElapsed = vappSegment.timeElapsed;
         let fuelWeight = TEMP_FUEL_WEIGHT;
         let distance = vappSegment.distanceTraveled;
 
@@ -71,12 +72,14 @@ export class DecelPathBuilder {
         );
         fuelWeight += cFullTo3Segment.fuelBurned;
         distance += cFullTo3Segment.distanceTraveled;
+        timeElapsed -= cFullTo3Segment.timeElapsed;
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.FlapsFull,
             distanceFromStart: profile.totalFlightPlanDistance - distance,
             speed: F,
             altitude: cFullTo3Segment.initialAltitude,
             remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
         });
 
         const c3to2Segment = DecelPathBuilder.computeConfigurationChangeSegment(
@@ -92,12 +95,14 @@ export class DecelPathBuilder {
         );
         fuelWeight += c3to2Segment.fuelBurned;
         distance += c3to2Segment.distanceTraveled;
+        timeElapsed -= c3to2Segment.timeElapsed;
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.Flaps3,
             distanceFromStart: profile.totalFlightPlanDistance - distance,
             speed: F + (S - F) / 2,
             altitude: c3to2Segment.initialAltitude,
             remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
         });
 
         const c2to1Segment = DecelPathBuilder.computeConfigurationChangeSegment(
@@ -113,12 +118,14 @@ export class DecelPathBuilder {
         );
         fuelWeight += c2to1Segment.fuelBurned;
         distance += c2to1Segment.distanceTraveled;
+        timeElapsed -= c2to1Segment.timeElapsed;
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.Flaps2,
             distanceFromStart: profile.totalFlightPlanDistance - distance,
             speed: S,
             altitude: c2to1Segment.initialAltitude,
             remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
         });
 
         const c1toCleanSegment = DecelPathBuilder.computeConfigurationChangeSegment(
@@ -134,12 +141,14 @@ export class DecelPathBuilder {
         );
         fuelWeight += c1toCleanSegment.fuelBurned;
         distance += c1toCleanSegment.distanceTraveled;
+        timeElapsed -= c1toCleanSegment.timeElapsed;
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.Flaps1,
             distanceFromStart: profile.totalFlightPlanDistance - distance,
             speed: O,
             altitude: c1toCleanSegment.initialAltitude,
             remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
         });
 
         let cleanToDesSpeedSegment = DecelPathBuilder.computeConfigurationChangeSegment(
@@ -180,12 +189,14 @@ export class DecelPathBuilder {
 
         fuelWeight += cleanToDesSpeedSegment.fuelBurned;
         distance += cleanToDesSpeedSegment.distanceTraveled;
+        timeElapsed -= cleanToDesSpeedSegment.timeElapsed;
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.Decel,
             distanceFromStart: profile.totalFlightPlanDistance - distance,
             speed: DES,
             altitude: cleanToDesSpeedSegment.initialAltitude,
             remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
         });
     }
 

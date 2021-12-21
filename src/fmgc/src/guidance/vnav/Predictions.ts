@@ -181,7 +181,7 @@ export class Predictions {
         const correctedFuelFlow = EngineModel.getCorrectedFuelFlow(correctedN1, mach, altitude) * 2;
         const fuelFlow = EngineModel.getUncorrectedFuelFlow(correctedFuelFlow, delta2, theta2); // in lbs/hour
 
-        const stepTime = (stepSize / (tas - headwind)) / 60; // in minutes
+        const stepTime = (stepSize / (tas - headwind)) * 60; // in minutes
         const fuelBurned = (fuelFlow / 60) * stepTime;
 
         return {

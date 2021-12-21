@@ -4342,6 +4342,14 @@ class FMCMainDisplay extends BaseAirliners {
         return this.managedSpeedClimb;
     }
 
+    getManagedCruiseSpeed() {
+        return this.managedSpeedCruise;
+    }
+
+    getManagedCruiseSpeedMach() {
+        return this.managedSpeedCruiseMach;
+    }
+
     getAccelerationAltitude() {
         return this.accelerationAltitude;
     }

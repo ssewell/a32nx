@@ -12,6 +12,9 @@ export interface VerticalProfileComputationParameters {
     fcuFlightPathAngle: Degrees,
     fcuSpeed: Knots | Mach,
 
+    managedCruiseSpeed: Knots,
+    managedCruiseSpeedMach: Mach,
+
     zeroFuelWeight: number, // pounds
     fuelOnBoard: number, // pounds
     v2Speed: Knots,
@@ -43,6 +46,9 @@ export class VerticalProfileComputationParametersObserver {
             fcuVerticalSpeed: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_VS_SELECTED', 'Feet per minute'),
             fcuFlightPathAngle: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_FPA_SELECTED', 'Degrees'),
             fcuSpeed: SimVar.GetSimVarValue('L:A32NX_AUTOPILOT_SPEED_SELECTED', 'number'),
+
+            managedCruiseSpeed: this.fmgc.getManagedCruiseSpeed(),
+            managedCruiseSpeedMach: this.fmgc.getManagedCruiseSpeedMach(),
 
             zeroFuelWeight: this.fmgc.getZeroFuelWeight(),
             fuelOnBoard: this.fmgc.getFOB(),
