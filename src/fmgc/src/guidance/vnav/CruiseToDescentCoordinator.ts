@@ -20,6 +20,10 @@ export class CruiseToDescentCoordinator {
             return;
         }
 
+        if (!this.decelPathBuilder.canCompute(profile.geometry)) {
+            return;
+        }
+
         let iterationCount = 0;
         let error = Infinity;
 
@@ -36,7 +40,7 @@ export class CruiseToDescentCoordinator {
             const cruisePath = this.cruisePathBuilder.computeCruisePath(profile);
 
             if (!cruisePath) {
-                break;
+                return;
             }
 
             const {

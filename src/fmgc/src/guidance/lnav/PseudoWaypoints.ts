@@ -52,6 +52,10 @@ export class PseudoWaypoints implements GuidanceComponent {
 
         const geometryProfile = this.guidanceController.vnavDriver.currentGeometryProfile;
 
+        if (!geometryProfile.isReadyToDisplay) {
+            return;
+        }
+
         // Restriction Level Off
         const levelOffCheckpoint = geometryProfile.findVerticalCheckpoint(VerticalCheckpointReason.LevelOffForConstraint);
         const levelOff = PseudoWaypoints.pointFromEndOfPath(geometry, wptCount, totalDistance - levelOffCheckpoint?.distanceFromStart);
