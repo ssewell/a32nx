@@ -47,18 +47,40 @@ export class DecelPathBuilder {
         const O = 203;
         const S = 184;
         const F = 143;
+        const Vapp = 135;
 
         if (!this.canCompute(profile.geometry)) {
             return;
         }
 
-        const vappSegment = this.computeVappSegment(profile.geometry);
+        const vappSegment = Predictions.geometricStep(
+            1_000,
+            50,
+            3.14,
+            Vapp,
+            999,
+            107_000,
+            estimatedFuelOnBoardAtDestination,
+            0,
+            TEMP_TROPO,
+            true,
+            FlapConf.CONF_FULL,
+        );
 
-        let timeElapsed = vappSegment.timeElapsed;
-        let fuelWeight = estimatedFuelOnBoardAtDestination;
+        let timeElapsed = -vappSegment.timeElapsed;
+        let fuelWeight = estimatedFuelOnBoardAtDestination + vappSegment.fuelBurned;
         let distance = vappSegment.distanceTraveled;
 
-        const cFullTo3Segment = this.computeConfigurationChangeSegment(
+        profile.checkpoints.push({
+            reason: VerticalCheckpointReason.Landing,
+            distanceFromStart: profile.totalFlightPlanDistance - distance,
+            speed: 135, // FIXME
+            altitude: vappSegment.finalAltitude,
+            remainingFuelOnBoard: fuelWeight,
+            secondsFromPresent: timeElapsed,
+        });
+
+        const cFullTo3Segment = DecelPathBuilder.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             1_000,
@@ -81,7 +103,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c3to2Segment = this.computeConfigurationChangeSegment(
+        const c3to2Segment = DecelPathBuilder.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             cFullTo3Segment.initialAltitude,
@@ -104,7 +126,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c2to1Segment = this.computeConfigurationChangeSegment(
+        const c2to1Segment = DecelPathBuilder.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             c3to2Segment.initialAltitude,
@@ -127,7 +149,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c1toCleanSegment = this.computeConfigurationChangeSegment(
+        const c1toCleanSegment = DecelPathBuilder.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -2.5,
             c2to1Segment.initialAltitude,
@@ -150,7 +172,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        let cleanToDesSpeedSegment = this.computeConfigurationChangeSegment(
+        let cleanToDesSpeedSegment = DecelPathBuilder.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -2.5,
             c1toCleanSegment.initialAltitude,
@@ -170,7 +192,7 @@ export class DecelPathBuilder {
             }
 
             // if (VnavConfig.VNAV_DESCENT_MODE !== VnavDescentMode.CDA) {
-            cleanToDesSpeedSegment = this.computeConfigurationChangeSegment(
+            cleanToDesSpeedSegment = DecelPathBuilder.computeConfigurationChangeSegment(
                 ApproachPathSegmentType.LEVEL_DECELERATION,
                 undefined,
                 c1toCleanSegment.initialAltitude,
@@ -200,43 +222,11 @@ export class DecelPathBuilder {
     }
 
     /**
-     * Calculates the Vapp segment of the DECEL path.
-     *
-     * @return the Vapp segment step results
-     */
-    private computeVappSegment(
-        geometry: Geometry,
-    ): StepResults {
-        const TEMP_VAPP = 135; // TODO actual Vapp
-
-        const finalAltitude = this.findLastApproachPoint(geometry);
-
-        // TODO For now we use some "reasonable" values for the segment. When we have the ability to predict idle N1 and such at approach conditions,
-        // we can change this.
-        return {
-            ...Predictions.altitudeStep(
-                1_000,
-                -(1_000 - finalAltitude),
-                TEMP_VAPP, // TODO placeholder value
-                999, // TODO placeholder value
-                26, // TODO placeholder value
-                107_000, // TODO placeholder value
-                5_000, // TODO placeholder value
-                2, // TODO placeholder value
-                0, // TODO placeholder value
-                36_000, // TODO placeholder value
-                false, // TODO placeholder value
-            ),
-            distanceTraveled: 3.14, // FIXME hard-coded correct value for -3deg fpa
-        };
-    }
-
-    /**
      * Calculates a config change segment of the DECEL path.
      *
      * @return the config change segment step results
      */
-    private computeConfigurationChangeSegment(
+    private static computeConfigurationChangeSegment(
         type: ApproachPathSegmentType,
         fpa: number,
         finalAltitude: Feet,
