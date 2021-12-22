@@ -2,11 +2,13 @@ import { TheoreticalDescentPathCharacteristics } from '@fmgc/guidance/vnav/desce
 import { GeometryProfile, VerticalCheckpointReason } from '@fmgc/guidance/vnav/GeometryProfile';
 
 export class DescentPathBuilder {
-    static computeDescentPath(profile: GeometryProfile): TheoreticalDescentPathCharacteristics {
+    computeDescentPath(profile: GeometryProfile): TheoreticalDescentPathCharacteristics {
+        const TEMP_FUEL_BURN = 2000;
+
         const decelCheckpoint = profile.checkpoints.find((checkpoint) => checkpoint.reason === VerticalCheckpointReason.Decel);
 
         if (!decelCheckpoint) {
-            return { tod: undefined };
+            return { tod: undefined, fuelBurnedDuringDescent: undefined, remainingFuelOnBoardAtTopOfDescent: undefined };
         }
 
         const cruiseAlt = SimVar.GetSimVarValue('L:AIRLINER_CRUISE_ALTITUDE', 'number');
@@ -28,11 +30,11 @@ export class DescentPathBuilder {
             reason: VerticalCheckpointReason.TopOfDescent,
             distanceFromStart: tod,
             speed: 290,
-            // remainingFuelOnBoard: 250,
+            remainingFuelOnBoard: decelCheckpoint.remainingFuelOnBoard + TEMP_FUEL_BURN,
             altitude: cruiseAlt,
         });
 
-        return { tod };
+        return { tod, fuelBurnedDuringDescent: TEMP_FUEL_BURN, remainingFuelOnBoardAtTopOfDescent: decelCheckpoint.remainingFuelOnBoard + TEMP_FUEL_BURN };
 
         //     const decelPointDistance = DecelPathBuilder.computeDecelPath(geometry);
         //

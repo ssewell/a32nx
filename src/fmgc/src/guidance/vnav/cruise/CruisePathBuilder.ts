@@ -5,7 +5,10 @@ import { AtmosphericConditions } from '../AtmosphericConditions';
 
 export interface CruisePathBuilderResults {
     remaingFuelOnBoardAtTopOfDescent: number,
-    secondsFromStartAtTopOfDescent: Seconds
+    secondsFromStartAtTopOfDescent: Seconds,
+    distanceTraveled: NauticalMiles,
+    timeElapsed: Seconds,
+    fuelBurned: number,
 }
 
 export class CruisePathBuilder {
@@ -19,7 +22,7 @@ export class CruisePathBuilder {
         this.atmosphericConditions.update();
     }
 
-    computeCruisePath(profile: GeometryProfile): StepResults {
+    computeCruisePath(profile: GeometryProfile): CruisePathBuilderResults {
         const topOfClimb = profile.findVerticalCheckpoint(VerticalCheckpointReason.TopOfClimb);
         const topOfDescent = profile.findVerticalCheckpoint(VerticalCheckpointReason.TopOfDescent);
 
@@ -32,7 +35,15 @@ export class CruisePathBuilder {
             return null;
         }
 
-        return this.computeCruiseSegment(topOfDescent.distanceFromStart - topOfClimb.distanceFromStart, topOfClimb.remainingFuelOnBoard);
+        const { fuelBurned, timeElapsed, distanceTraveled } = this.computeCruiseSegment(topOfDescent.distanceFromStart - topOfClimb.distanceFromStart, topOfClimb.remainingFuelOnBoard);
+
+        return {
+            remaingFuelOnBoardAtTopOfDescent: topOfClimb.remainingFuelOnBoard - fuelBurned,
+            secondsFromStartAtTopOfDescent: topOfClimb.secondsFromPresent + timeElapsed * 60,
+            distanceTraveled,
+            timeElapsed,
+            fuelBurned,
+        };
     }
 
     private computeCruiseSegment(distance: NauticalMiles, remainingFuelOnBoard: number): StepResults {

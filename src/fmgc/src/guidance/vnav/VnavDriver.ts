@@ -9,6 +9,7 @@ import { FlightPlanManager } from '@fmgc/flightplanning/FlightPlanManager';
 import { PseudoWaypointFlightPlanInfo } from '@fmgc/guidance/PsuedoWaypoint';
 import { VerticalProfileComputationParametersObserver } from '@fmgc/guidance/vnav/VerticalProfileComputationParameters';
 import { CruisePathBuilder } from '@fmgc/guidance/vnav/cruise/CruisePathBuilder';
+import { CruiseToDescentCoordinator } from '@fmgc/guidance/vnav/CruiseToDescentCoordinator';
 import { Geometry } from '../Geometry';
 import { GuidanceComponent } from '../GuidanceComponent';
 import { GeometryProfile } from './GeometryProfile';
@@ -18,6 +19,12 @@ export class VnavDriver implements GuidanceComponent {
     climbPathBuilder: ClimbPathBuilder;
 
     cruisePathBuilder: CruisePathBuilder;
+
+    descentPathBuilder: DescentPathBuilder;
+
+    decelPathBuilder: DecelPathBuilder;
+
+    cruiseToDescentCoordinator: CruiseToDescentCoordinator;
 
     currentGeometryProfile: GeometryProfile;
 
@@ -36,6 +43,9 @@ export class VnavDriver implements GuidanceComponent {
     ) {
         this.climbPathBuilder = new ClimbPathBuilder(computationParametersObserver);
         this.cruisePathBuilder = new CruisePathBuilder(computationParametersObserver);
+        this.descentPathBuilder = new DescentPathBuilder();
+        this.decelPathBuilder = new DecelPathBuilder();
+        this.cruiseToDescentCoordinator = new CruiseToDescentCoordinator(this.cruisePathBuilder, this.descentPathBuilder, this.decelPathBuilder);
     }
 
     init(): void {
@@ -86,13 +96,7 @@ export class VnavDriver implements GuidanceComponent {
         if (geometry.legs.size > 0 && this.computationParametersObserver.canComputeProfile()) {
             this.climbPathBuilder.computeClimbPath(this.currentGeometryProfile);
 
-            DecelPathBuilder.computeDecelPath(this.currentGeometryProfile);
-            this.currentDescentProfile = DescentPathBuilder.computeDescentPath(this.currentGeometryProfile);
-
-            const cruiseSegment = this.cruisePathBuilder.computeCruisePath(this.currentGeometryProfile);
-            if (DEBUG) {
-                console.log(`[FMS/VNAV] Cruise segment was ${cruiseSegment.distanceTraveled} nm long and took ${cruiseSegment.timeElapsed} min`);
-            }
+            this.cruiseToDescentCoordinator.coordinate(this.currentGeometryProfile);
 
             this.currentGeometryProfile.finalizeProfile();
 

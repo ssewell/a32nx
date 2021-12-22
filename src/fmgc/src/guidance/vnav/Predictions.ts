@@ -340,7 +340,7 @@ export class Predictions {
             finalAltitude = initialAltitude + (verticalSpeed * (stepTime / 60)); // in feet
             // TODO: now that we have final altitude, we could get accurate mid-step headwind instead of using initial headwind...
             // distanceTraveled = (averageTas - headwindAtInitialAltitude) * (stepTime / 3_600); // in NM
-            fuelBurned = (fuelFlow / 60) * stepTime;
+            fuelBurned = (fuelFlow / 3600) * stepTime;
             // const endStepWeight = zeroFuelWeight + (initialFuelWeight - fuelBurned); <- not really needed
 
             // Adjust variables for better accuracy next iteration

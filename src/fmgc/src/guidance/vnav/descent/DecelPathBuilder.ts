@@ -30,7 +30,7 @@ export interface DecelPathCharacteristics {
 }
 
 export class DecelPathBuilder {
-    static computeDecelPath(profile: GeometryProfile) {
+    computeDecelPath(profile: GeometryProfile, estimatedFuelOnBoardAtDestination: number) {
         // TO GET FPA:
         // If approach exists, use approach alt constraints to get FPA and glidepath
         // If no approach but arrival, use arrival alt constraints, if any
@@ -43,7 +43,6 @@ export class DecelPathBuilder {
         // The point at the beginning of the speedChangeStep is DECEL
 
         const TEMP_TROPO = 36_000;
-        const TEMP_FUEL_WEIGHT = 2_300;
         const DES = 250;
         const O = 203;
         const S = 184;
@@ -53,13 +52,13 @@ export class DecelPathBuilder {
             return;
         }
 
-        const vappSegment = DecelPathBuilder.computeVappSegment(profile.geometry);
+        const vappSegment = this.computeVappSegment(profile.geometry);
 
         let timeElapsed = vappSegment.timeElapsed;
-        let fuelWeight = TEMP_FUEL_WEIGHT;
+        let fuelWeight = estimatedFuelOnBoardAtDestination;
         let distance = vappSegment.distanceTraveled;
 
-        const cFullTo3Segment = DecelPathBuilder.computeConfigurationChangeSegment(
+        const cFullTo3Segment = this.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             1_000,
@@ -82,7 +81,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c3to2Segment = DecelPathBuilder.computeConfigurationChangeSegment(
+        const c3to2Segment = this.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             cFullTo3Segment.initialAltitude,
@@ -105,7 +104,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c2to1Segment = DecelPathBuilder.computeConfigurationChangeSegment(
+        const c2to1Segment = this.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -3,
             c3to2Segment.initialAltitude,
@@ -128,7 +127,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        const c1toCleanSegment = DecelPathBuilder.computeConfigurationChangeSegment(
+        const c1toCleanSegment = this.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -2.5,
             c2to1Segment.initialAltitude,
@@ -151,7 +150,7 @@ export class DecelPathBuilder {
             secondsFromPresent: timeElapsed,
         });
 
-        let cleanToDesSpeedSegment = DecelPathBuilder.computeConfigurationChangeSegment(
+        let cleanToDesSpeedSegment = this.computeConfigurationChangeSegment(
             ApproachPathSegmentType.CONSTANT_SLOPE,
             -2.5,
             c1toCleanSegment.initialAltitude,
@@ -171,7 +170,7 @@ export class DecelPathBuilder {
             }
 
             // if (VnavConfig.VNAV_DESCENT_MODE !== VnavDescentMode.CDA) {
-            cleanToDesSpeedSegment = DecelPathBuilder.computeConfigurationChangeSegment(
+            cleanToDesSpeedSegment = this.computeConfigurationChangeSegment(
                 ApproachPathSegmentType.LEVEL_DECELERATION,
                 undefined,
                 c1toCleanSegment.initialAltitude,
@@ -205,12 +204,12 @@ export class DecelPathBuilder {
      *
      * @return the Vapp segment step results
      */
-    private static computeVappSegment(
+    private computeVappSegment(
         geometry: Geometry,
     ): StepResults {
         const TEMP_VAPP = 135; // TODO actual Vapp
 
-        const finalAltitude = DecelPathBuilder.findLastApproachPoint(geometry);
+        const finalAltitude = this.findLastApproachPoint(geometry);
 
         // TODO For now we use some "reasonable" values for the segment. When we have the ability to predict idle N1 and such at approach conditions,
         // we can change this.
@@ -237,7 +236,7 @@ export class DecelPathBuilder {
      *
      * @return the config change segment step results
      */
-    private static computeConfigurationChangeSegment(
+    private computeConfigurationChangeSegment(
         type: ApproachPathSegmentType,
         fpa: number,
         finalAltitude: Feet,
@@ -352,7 +351,7 @@ export class DecelPathBuilder {
     /**
      * Only compute if the last leg is a destination airport / runway
      */
-    static canCompute(geometry: Geometry): boolean {
+    canCompute(geometry: Geometry): boolean {
         const lastLeg = geometry.legs.get(geometry.legs.size - 1);
 
         return lastLeg instanceof TFLeg && (lastLeg.to.isRunway || lastLeg.to.type === 'A');
@@ -364,7 +363,7 @@ export class DecelPathBuilder {
      * - missed approach point;
      * - airport.
      */
-    private static findLastApproachPoint(
+    private findLastApproachPoint(
         geometry: Geometry,
     ): Feet {
         const lastLeg = geometry.legs.get(geometry.legs.size - 1);
