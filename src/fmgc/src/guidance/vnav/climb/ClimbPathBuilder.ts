@@ -179,7 +179,7 @@ export class ClimbPathBuilder {
 
             const climbSpeed = Math.min(
                 altitude >= speedLimit.underAltitude ? managedClimbSpeed : speedLimit.speed,
-                this.findMaxSpeedAtDistanceAlongTrack(profile, lastCheckpoint.distanceFromStart),
+                lastCheckpoint.speed,
             );
 
             const targetAltitudeForSegment = Math.min(altitude + 1500, targetAltitude);
@@ -244,10 +244,8 @@ export class ClimbPathBuilder {
         }
 
         // Move from last constraint to target distance from start
-        const speed = Math.min(
-            altitude >= speedLimit.underAltitude ? managedClimbSpeed : speedLimit.speed,
-            this.findMaxSpeedAtDistanceAlongTrack(profile, toDistanceFromStart),
-        );
+        // No need to check for a speed constraint here as we just iterated through all of them
+        const speed = altitude >= speedLimit.underAltitude ? managedClimbSpeed : speedLimit.speed;
 
         const lastCheckpoint = profile.lastCheckpoint;
 
