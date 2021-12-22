@@ -91,22 +91,22 @@ export class PseudoWaypoints implements GuidanceComponent {
         }
 
         // Speed Changes
-        const speedChanges = geometryProfile.findDistancesFromEndToSpeedChanges();
+        const firstSpeedChange = geometryProfile.findDistancesFromEndToSpeedChanges()[0];
 
-        for (let i = 0; i < speedChanges.length; i++) {
-            const speedChange = PseudoWaypoints.pointFromEndOfPath(geometry, wptCount, speedChanges[i]);
+        if (firstSpeedChange) {
+            const speedChange = PseudoWaypoints.pointFromEndOfPath(geometry, wptCount, firstSpeedChange);
 
             if (speedChange) {
                 const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = speedChange;
 
                 newPseudoWaypoints.push({
-                    ident: `Speed change ${i}`,
+                    ident: 'Speed change',
                     alongLegIndex,
                     distanceFromLegTermination,
                     efisSymbolFlag: NdSymbolTypeFlags.SpeedChange,
                     efisSymbolLla,
                     displayedOnMcdu: false,
-                    stats: PseudoWaypoints.computePseudoWaypointStats(`Speed change ${i}`, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                    stats: PseudoWaypoints.computePseudoWaypointStats('Speed change', geometry.legs.get(alongLegIndex), distanceFromLegTermination),
                 });
             }
         }
