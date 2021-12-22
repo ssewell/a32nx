@@ -33,13 +33,24 @@ export class CruiseToDescentCoordinator {
                 return;
             }
 
-            const { remaingFuelOnBoardAtTopOfDescent: remaingFuelOnBoardAtTopOfDescentComputedForwards, distanceTraveled, timeElapsed } = this.cruisePathBuilder.computeCruisePath(profile);
+            const cruisePath = this.cruisePathBuilder.computeCruisePath(profile);
+
+            if (!cruisePath) {
+                break;
+            }
+
+            const {
+                remainingFuelOnBoardAtTopOfDescent: remainingFuelOnBoardAtTopOfDescentComputedForwards,
+                distanceTraveled,
+                timeElapsed,
+            } = cruisePath;
+
             if (DEBUG) {
                 console.log(`[FMS/VNAV] Cruise segment was ${distanceTraveled} nm long and took ${timeElapsed} min`);
             }
 
-            estimatedFuelAtDestination = remaingFuelOnBoardAtTopOfDescentComputedForwards - fuelBurnedDuringDescent;
-            error = remaingFuelOnBoardAtTopOfDescentComputedForwards - remainingFuelOnBoardAtTopOfDescentComputedBackwards;
+            estimatedFuelAtDestination = remainingFuelOnBoardAtTopOfDescentComputedForwards - fuelBurnedDuringDescent;
+            error = remainingFuelOnBoardAtTopOfDescentComputedForwards - remainingFuelOnBoardAtTopOfDescentComputedBackwards;
         }
     }
 }

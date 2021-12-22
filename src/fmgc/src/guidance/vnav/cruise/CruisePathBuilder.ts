@@ -4,7 +4,7 @@ import { GeometryProfile, VerticalCheckpointReason } from '../GeometryProfile';
 import { AtmosphericConditions } from '../AtmosphericConditions';
 
 export interface CruisePathBuilderResults {
-    remaingFuelOnBoardAtTopOfDescent: number,
+    remainingFuelOnBoardAtTopOfDescent: number,
     secondsFromStartAtTopOfDescent: Seconds,
     distanceTraveled: NauticalMiles,
     timeElapsed: Seconds,
@@ -38,7 +38,7 @@ export class CruisePathBuilder {
         const { fuelBurned, timeElapsed, distanceTraveled } = this.computeCruiseSegment(topOfDescent.distanceFromStart - topOfClimb.distanceFromStart, topOfClimb.remainingFuelOnBoard);
 
         return {
-            remaingFuelOnBoardAtTopOfDescent: topOfClimb.remainingFuelOnBoard - fuelBurned,
+            remainingFuelOnBoardAtTopOfDescent: topOfClimb.remainingFuelOnBoard - fuelBurned,
             secondsFromStartAtTopOfDescent: topOfClimb.secondsFromPresent + timeElapsed * 60,
             distanceTraveled,
             timeElapsed,
