@@ -12,6 +12,9 @@ import { Leg } from '@fmgc/guidance/lnav/legs/Leg';
 import { VerticalCheckpointReason } from '@fmgc/guidance/vnav/GeometryProfile';
 import { TimeUtils } from '@fmgc/utils/TimeUtils';
 
+const PWP_IDENT_CLIMB_CONSTRAINT_LEVEL_OFF = 'Level off for climb constraint';
+const PWP_IDENT_CONTINUE_CLIMB = 'Continue climb';
+const PWP_SPEED_CHANGE = 'Speed change';
 const PWP_IDENT_TOC = '(T/C)';
 const PWP_IDENT_SPD_LIM = '(LIM)';
 const PWP_IDENT_TOD = '(T/D)';
@@ -42,6 +45,16 @@ export class PseudoWaypoints implements GuidanceComponent {
         const geometry = this.guidanceController.activeGeometry;
         const wptCount = this.guidanceController.flightPlanManager.getWaypointsCount();
 
+        const heading = SimVar.GetSimVarValue('PLANE HEADING DEGREES MAGNETIC', 'degrees');
+        let track = SimVar.GetSimVarValue('GPS GROUND MAGNETIC TRACK', 'degrees');
+        const groundSpeed = SimVar.GetSimVarValue('GPS GROUND SPEED', 'Meters per second');
+        const trueHeading = SimVar.GetSimVarValue('PLANE HEADING DEGREES TRUE', 'degrees');
+
+        // Workaround for bug with gps ground track simvar
+        if (groundSpeed < 40) {
+            track = (0.025 * groundSpeed + 0.00005) * track + (1 - (0.025 * groundSpeed + 0.00005)) * heading;
+        }
+
         if (!geometry || geometry.legs.size < 1) {
             this.pseudoWaypoints.length = 0;
             return;
@@ -64,13 +77,13 @@ export class PseudoWaypoints implements GuidanceComponent {
             const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = levelOff;
 
             newPseudoWaypoints.push({
-                ident: 'Level off',
+                ident: PWP_IDENT_CLIMB_CONSTRAINT_LEVEL_OFF,
                 alongLegIndex,
                 distanceFromLegTermination,
                 efisSymbolFlag: NdSymbolTypeFlags.PwpLevelOffForRestriction,
                 efisSymbolLla,
                 displayedOnMcdu: false,
-                stats: PseudoWaypoints.computePseudoWaypointStats('Level off', geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                stats: PseudoWaypoints.computePseudoWaypointStats(PWP_IDENT_CLIMB_CONSTRAINT_LEVEL_OFF, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
                 flightPlanInfo: levelOffCheckpoint,
             });
         }
@@ -83,13 +96,13 @@ export class PseudoWaypoints implements GuidanceComponent {
             const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = continueClimb;
 
             newPseudoWaypoints.push({
-                ident: 'Continue Climb',
+                ident: PWP_IDENT_CONTINUE_CLIMB,
                 alongLegIndex,
                 distanceFromLegTermination,
                 efisSymbolFlag: NdSymbolTypeFlags.PwpContinueClimb,
                 efisSymbolLla,
                 displayedOnMcdu: false,
-                stats: PseudoWaypoints.computePseudoWaypointStats('Continue Climb', geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                stats: PseudoWaypoints.computePseudoWaypointStats(PWP_IDENT_CONTINUE_CLIMB, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
                 flightPlanInfo: continueClimbCheckpoint,
             });
         }
@@ -104,13 +117,13 @@ export class PseudoWaypoints implements GuidanceComponent {
                 const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = speedChange;
 
                 newPseudoWaypoints.push({
-                    ident: 'Speed change',
+                    ident: PWP_SPEED_CHANGE,
                     alongLegIndex,
                     distanceFromLegTermination,
                     efisSymbolFlag: NdSymbolTypeFlags.SpeedChange,
                     efisSymbolLla,
                     displayedOnMcdu: false,
-                    stats: PseudoWaypoints.computePseudoWaypointStats('Speed change', geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                    stats: PseudoWaypoints.computePseudoWaypointStats(PWP_SPEED_CHANGE, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
                 });
             }
         }
@@ -137,19 +150,37 @@ export class PseudoWaypoints implements GuidanceComponent {
 
         // Top Of Climb
         const tocCheckpoint = geometryProfile.findVerticalCheckpoint(VerticalCheckpointReason.TopOfClimb);
-        const toc = PseudoWaypoints.pointFromEndOfPath(geometry, wptCount, totalDistance - tocCheckpoint?.distanceFromStart);
 
-        if (toc) {
-            const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = toc;
+        if (geometryProfile.shouldDrawPwpAlongNavPath) {
+            const toc = PseudoWaypoints.pointFromEndOfPath(geometry, wptCount, totalDistance - tocCheckpoint?.distanceFromStart);
+
+            if (toc) {
+                const [efisSymbolLla, distanceFromLegTermination, alongLegIndex] = toc;
+
+                newPseudoWaypoints.push({
+                    ident: PWP_IDENT_TOC,
+                    alongLegIndex,
+                    distanceFromLegTermination,
+                    efisSymbolFlag: NdSymbolTypeFlags.PwpTopOfClimb,
+                    efisSymbolLla,
+                    displayedOnMcdu: true,
+                    stats: PseudoWaypoints.computePseudoWaypointStats(PWP_IDENT_TOC, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                    flightPlanInfo: tocCheckpoint,
+                });
+            }
+        } else {
+            const { lat, long } = this.guidanceController.getPresentPosition();
+            const diff = Avionics.Utils.diffAngle(heading, track);
+            const toc = Avionics.Utils.bearingDistanceToCoordinates(trueHeading + diff, tocCheckpoint.distanceFromStart, lat, long);
 
             newPseudoWaypoints.push({
                 ident: PWP_IDENT_TOC,
-                alongLegIndex,
-                distanceFromLegTermination,
+                alongLegIndex: Infinity,
+                distanceFromLegTermination: 0,
                 efisSymbolFlag: NdSymbolTypeFlags.PwpTopOfClimb,
-                efisSymbolLla,
+                efisSymbolLla: toc,
                 displayedOnMcdu: true,
-                stats: PseudoWaypoints.computePseudoWaypointStats(PWP_IDENT_TOC, geometry.legs.get(alongLegIndex), distanceFromLegTermination),
+                stats: undefined,
                 flightPlanInfo: tocCheckpoint,
             });
         }

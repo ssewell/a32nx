@@ -10,6 +10,7 @@ import { PseudoWaypointFlightPlanInfo } from '@fmgc/guidance/PsuedoWaypoint';
 import { VerticalProfileComputationParametersObserver } from '@fmgc/guidance/vnav/VerticalProfileComputationParameters';
 import { CruisePathBuilder } from '@fmgc/guidance/vnav/cruise/CruisePathBuilder';
 import { CruiseToDescentCoordinator } from '@fmgc/guidance/vnav/CruiseToDescentCoordinator';
+import { LateralMode } from '@shared/autopilot';
 import { Geometry } from '../Geometry';
 import { GuidanceComponent } from '../GuidanceComponent';
 import { GeometryProfile } from './GeometryProfile';
@@ -91,7 +92,7 @@ export class VnavDriver implements GuidanceComponent {
     }
 
     private computeVerticalProfile(geometry: Geometry) {
-        this.currentGeometryProfile = new GeometryProfile(geometry, this.flightPlanManager, this.guidanceController.activeLegIndex);
+        this.currentGeometryProfile = new GeometryProfile(geometry, this.flightPlanManager, this.guidanceController.activeLegIndex, this.isInManagedNav());
 
         if (geometry.legs.size > 0 && this.computationParametersObserver.canComputeProfile()) {
             this.climbPathBuilder.computeClimbPath(this.currentGeometryProfile);
@@ -106,5 +107,11 @@ export class VnavDriver implements GuidanceComponent {
         } else if (DEBUG) {
             console.warn('[FMS/VNAV] Did not compute vertical profile. Reason: no legs in flight plan.');
         }
+    }
+
+    private isInManagedNav(): boolean {
+        const { fcuLateralMode } = this.computationParametersObserver.get();
+
+        return fcuLateralMode === LateralMode.NAV;
     }
 }

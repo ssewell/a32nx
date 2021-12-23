@@ -294,4 +294,8 @@ export class GuidanceController {
     sequencePseudoWaypoint(pseudoWaypoint: PseudoWaypoint): void {
         this.pseudoWaypoints.sequencePseudoWaypoint(pseudoWaypoint);
     }
+
+    getPresentPosition(): LatLongAlt {
+        return this.verticalProfileComputationParametersObserver.getPresentPosition();
+    }
 }

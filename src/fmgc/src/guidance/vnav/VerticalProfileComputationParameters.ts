@@ -68,7 +68,7 @@ export class VerticalProfileComputationParametersObserver {
         };
     }
 
-    private getPresentPosition(): LatLongAlt {
+    getPresentPosition(): LatLongAlt {
         return new LatLongAlt(
             SimVar.GetSimVarValue('PLANE LATITUDE', 'degree latitude'),
             SimVar.GetSimVarValue('PLANE LONGITUDE', 'degree longitude'),

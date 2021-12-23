@@ -77,12 +77,16 @@ export class GeometryProfile {
 
     public maxSpeedConstraints: MaxSpeedConstraint[] = [];
 
+    public shouldDrawPwpAlongNavPath: boolean;
+
     constructor(
         public geometry: Geometry,
         flightPlanManager: FlightPlanManager,
         activeLegIndex: number,
+        drawPwpAlongNavPath: boolean,
     ) {
         this.extractGeometryInformation(flightPlanManager, activeLegIndex);
+        this.shouldDrawPwpAlongNavPath = drawPwpAlongNavPath;
 
         if (DEBUG) {
             console.log('[FMS/VNAV] Altitude constraints:', this.maxAltitudeConstraints);

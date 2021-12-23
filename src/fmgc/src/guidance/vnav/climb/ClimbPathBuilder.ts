@@ -84,12 +84,14 @@ export class ClimbPathBuilder {
     }
 
     private addPresentPositionCheckpoint(profile: GeometryProfile, altitude: Feet) {
+        const distanceFromStart = profile.shouldDrawPwpAlongNavPath ? profile.distanceToPresentPosition : 0;
+
         profile.checkpoints.push({
             reason: VerticalCheckpointReason.PresentPosition,
-            distanceFromStart: profile.distanceToPresentPosition,
+            distanceFromStart,
             secondsFromPresent: 0,
             altitude,
-            remainingFuelOnBoard: this.computationParametersObserver.get().fuelOnBoard,
+            remainingFuelOnBoard: this.computationParametersObserver.get().fuelOnBoard * ClimbPathBuilder.TONS_TO_POUNDS,
             speed: SimVar.GetSimVarValue('AIRSPEED INDICATED', 'knots'),
         });
     }
