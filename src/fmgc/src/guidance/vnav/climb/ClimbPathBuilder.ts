@@ -4,18 +4,27 @@ import { VerticalMode } from '@shared/autopilot';
 import { EngineModel } from '../EngineModel';
 import { FlapConf } from '../common';
 import { Predictions, StepResults } from '../Predictions';
-import { GeometryProfile, VerticalCheckpointReason } from '../GeometryProfile';
+import { GeometryProfile, MaxAltitudeConstraint, VerticalCheckpointReason } from '../GeometryProfile';
 import { AtmosphericConditions } from '../AtmosphericConditions';
 
 export class ClimbPathBuilder {
     private static TONS_TO_POUNDS = 2204.62;
 
     private verticalModesToComputeProfileFor: VerticalMode[] = [
-        VerticalMode.ALT_CPT,
-        VerticalMode.ALT_CST_CPT,
         VerticalMode.CLB,
         VerticalMode.OP_CLB,
         VerticalMode.VS,
+        VerticalMode.ALT_CPT,
+        VerticalMode.ALT_CST_CPT,
+        VerticalMode.ALT_CST,
+        VerticalMode.SRS,
+    ]
+
+    private verticalModesToApplyAltitudeConstraintsFor: VerticalMode[] = [
+        VerticalMode.ALT_CPT,
+        VerticalMode.ALT_CST_CPT,
+        VerticalMode.CLB,
+        VerticalMode.ALT_CST,
     ]
 
     private atmosphericConditions: AtmosphericConditions = new AtmosphericConditions();
@@ -136,7 +145,9 @@ export class ClimbPathBuilder {
     }
 
     private addClimbSteps(profile: GeometryProfile, finalAltitude: Feet, finalAltitudeReason: VerticalCheckpointReason = VerticalCheckpointReason.AtmosphericConditions) {
-        for (const constraint of profile.maxAltitudeConstraints) {
+        const constraints = this.getAltitudeConstraintsForVerticalMode(profile);
+
+        for (const constraint of constraints) {
             const { maxAltitude: constraintAltitude, distanceFromStart: constraintDistanceFromStart } = constraint;
 
             if (constraintAltitude >= finalAltitude) {
@@ -350,5 +361,17 @@ export class ClimbPathBuilder {
         for (const { distanceFromStart, maxSpeed } of profile.maxSpeedConstraints) {
             profile.addSpeedCheckpoint(distanceFromStart, maxSpeed, VerticalCheckpointReason.SpeedConstraint);
         }
+    }
+
+    private getAltitudeConstraintsForVerticalMode(profile: GeometryProfile): MaxAltitudeConstraint[] {
+        const { fcuVerticalMode, flightPhase } = this.computationParametersObserver.get();
+
+        if (flightPhase === FlightPhase.FLIGHT_PHASE_PREFLIGHT
+            || this.verticalModesToApplyAltitudeConstraintsFor.includes(fcuVerticalMode)
+        ) {
+            return profile.maxAltitudeConstraints;
+        }
+
+        return [];
     }
 }
