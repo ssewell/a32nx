@@ -10,6 +10,7 @@ import { EfisState } from '@fmgc/guidance/FmsState';
 import { EfisSide, Mode, rangeSettings } from '@shared/NavigationDisplay';
 import { TaskCategory, TaskQueue } from '@fmgc/guidance/TaskQueue';
 import { VerticalProfileComputationParametersObserver } from '@fmgc/guidance/vnav/VerticalProfileComputationParameters';
+import { SpeedLimit } from '@fmgc/guidance/vnav/SpeedLimit';
 import { LnavDriver } from './lnav/LnavDriver';
 import { FlightPlanManager, FlightPlans } from '../flightplanning/FlightPlanManager';
 import { GuidanceManager } from './GuidanceManager';
@@ -28,8 +29,9 @@ export interface Fmgc {
     getThrustReductionAltitude(): Feet,
     getCruiseAltitude(): Feet,
     getFlightPhase(): FlightPhase,
-    getManagedCruiseSpeed(): Knots
-    getManagedCruiseSpeedMach(): Mach
+    getManagedCruiseSpeed(): Knots,
+    getManagedCruiseSpeedMach(): Mach,
+    getSpeedLimit(): SpeedLimit,
 }
 
 export class GuidanceController {

@@ -60,10 +60,7 @@ export class VerticalProfileComputationParametersObserver {
             accelerationAltitude: this.fmgc.getAccelerationAltitude(),
             thrustReductionAltitude: this.fmgc.getThrustReductionAltitude(),
             cruiseAltitude: this.fmgc.getCruiseAltitude(),
-            speedLimit: {
-                underAltitude: 10000,
-                speed: 250,
-            },
+            speedLimit: this.fmgc.getSpeedLimit(),
             flightPhase: this.fmgc.getFlightPhase(),
         };
     }

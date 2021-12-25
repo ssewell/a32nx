@@ -4365,6 +4365,17 @@ class FMCMainDisplay extends BaseAirliners {
     getFlightPhase() {
         return this.currentFlightPhase;
     }
+    getSpeedLimit() {
+        return {
+            speed: this.managedSpeedLimit,
+            underAltitude: this.managedSpeedLimitAlt,
+        };
+    }
+
+    setSpeedLimit(speedLimit, speedLimitAlt) {
+        this.managedSpeedLimit = speedLimit;
+        this.managedSpeedLimitAlt = speedLimitAlt;
+    }
 }
 
 FMCMainDisplay.clrValue = "\xa0\xa0\xa0\xa0\xa0CLR";

@@ -567,6 +567,13 @@ class CDUFlightPlanPage {
                     isOverfly: false,
                     slashColor: "green"
                 };
+
+                addLskAt(rowI, 0, (value, scratchpadCallback) => {
+                    if (value === FMCMainDisplay.clrValue) {
+                        // TODO
+                        mcdu.addNewMessage(NXSystemMessages.notAllowed);
+                    }
+                });
             } else if (marker) {
 
                 // Marker
