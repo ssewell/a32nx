@@ -100,7 +100,6 @@ const NavigationDisplay: React.FC = () => {
             electricitySimvar={displayIndex === 1 ? 'L:A32NX_ELEC_AC_ESS_BUS_IS_POWERED' : 'L:A32NX_ELEC_AC_2_BUS_IS_POWERED'}
             potentiometerIndex={displayIndex === 1 ? 89 : 91}
         >
-            <div className="BacklightBleed" />
             <FlightPlanProvider>
                 <svg className="nd-svg" version="1.1" viewBox="0 0 768 768">
                     <SpeedIndicator adrs={airDataReferenceSource} irs={inertialReferenceSource} />
@@ -126,17 +125,17 @@ const NavigationDisplay: React.FC = () => {
                         />
                     )}
                     {(modeIndex === Mode.ROSE_ILS || modeIndex === Mode.ROSE_VOR || modeIndex === Mode.ROSE_NAV)
-                    && (
-                        <RoseMode
-                            adirsAlign={adirsAlign}
-                            rangeSetting={rangeSettings[rangeIndex]}
-                            symbols={symbols}
-                            side={side}
-                            ppos={ppos}
-                            mode={modeIndex}
-                            mapHidden={modeChangeShown || rangeChangeShown}
-                        />
-                    )}
+                        && (
+                            <RoseMode
+                                adirsAlign={adirsAlign}
+                                rangeSetting={rangeSettings[rangeIndex]}
+                                symbols={symbols}
+                                side={side}
+                                ppos={ppos}
+                                mode={modeIndex}
+                                mapHidden={modeChangeShown || rangeChangeShown}
+                            />
+                        )}
 
                     <Chrono side={side} />
 
