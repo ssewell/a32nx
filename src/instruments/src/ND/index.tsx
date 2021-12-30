@@ -125,17 +125,17 @@ const NavigationDisplay: React.FC = () => {
                         />
                     )}
                     {(modeIndex === Mode.ROSE_ILS || modeIndex === Mode.ROSE_VOR || modeIndex === Mode.ROSE_NAV)
-                    && (
-                        <RoseMode
-                            adirsAlign={adirsAlign}
-                            rangeSetting={rangeSettings[rangeIndex]}
-                            symbols={symbols}
-                            side={side}
-                            ppos={ppos}
-                            mode={modeIndex}
-                            mapHidden={modeChangeShown || rangeChangeShown}
-                        />
-                    )}
+                        && (
+                            <RoseMode
+                                adirsAlign={adirsAlign}
+                                rangeSetting={rangeSettings[rangeIndex]}
+                                symbols={symbols}
+                                side={side}
+                                ppos={ppos}
+                                mode={modeIndex}
+                                mapHidden={modeChangeShown || rangeChangeShown}
+                            />
+                        )}
 
                     <Chrono side={side} />
 

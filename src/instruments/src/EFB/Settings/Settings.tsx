@@ -239,6 +239,7 @@ const SimOptionsPage = () => {
     const [dynamicRegistration, setDynamicRegistration] = usePersistentProperty('DYNAMIC_REGISTRATION_DECAL', '0');
     const [defaultBaro, setDefaultBaro] = usePersistentProperty('CONFIG_INIT_BARO_UNIT', 'AUTO');
     const [mcduServerPort, setMcduServerPort] = usePersistentProperty('CONFIG_EXTERNAL_MCDU_PORT', '8080');
+    const [homeCockpit, setHomeCockpit] = usePersistentProperty('HOME_COCKPIT_ENABLED', '0');
 
     const fpSyncButtons: ButtonType[] = [
         { name: 'None', setting: 'NONE' },
@@ -347,6 +348,7 @@ const RealismPage = () => {
     const [mcduInput, setMcduInput] = usePersistentProperty('MCDU_KB_INPUT', 'DISABLED');
     const [mcduTimeout, setMcduTimeout] = usePersistentProperty('CONFIG_MCDU_KB_TIMEOUT', '60');
     const [realisticTiller, setRealisticTiller] = usePersistentProperty('REALISTIC_TILLER_ENABLED', '0');
+    const [homeCockpit, setHomeCockpit] = usePersistentProperty('HOME_COCKPIT_ENABLED', '0');
 
     const adirsAlignTimeButtons: (ButtonType & SimVarButton)[] = [
         { name: 'Instant', setting: 'INSTANT', simVarValue: 1 },
@@ -371,105 +373,125 @@ const RealismPage = () => {
         { name: 'Enabled', setting: '1', simVarValue: 1 },
     ];
 
+    const homeCockpitButtons: (ButtonType & SimVarButton)[] = [
+        { name: 'Disabled', setting: '0', simVarValue: 0 },
+        { name: 'Enabled', setting: '1', simVarValue: 1 },
+    ];
+
     return (
         <div>
             {!showThrottleSettings
-        && (
-            <>
-                <div className="bg-navy-lighter rounded-xl px-6 shadow-lg divide-y divide-gray-700 flex flex-col">
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span className="text-lg text-gray-300">ADIRS Align Time</span>
-                        <SelectGroup>
-                            {adirsAlignTimeButtons.map((button) => (
-                                <SelectItem
-                                    enabled
-                                    onSelect={() => {
-                                        setAdirsAlignTime(button.setting);
-                                        setAdirsAlignTimeSimVar(button.simVarValue);
-                                    }}
-                                    selected={adirsAlignTime === button.setting}
-                                >
-                                    {button.name}
-                                </SelectItem>
-                            ))}
-                        </SelectGroup>
-                    </div>
+                && (
+                    <>
+                        <div className="bg-navy-lighter rounded-xl px-6 shadow-lg divide-y divide-gray-700 flex flex-col">
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span className="text-lg text-gray-300">ADIRS Align Time</span>
+                                <SelectGroup>
+                                    {adirsAlignTimeButtons.map((button) => (
+                                        <SelectItem
+                                            enabled
+                                            onSelect={() => {
+                                                setAdirsAlignTime(button.setting);
+                                                setAdirsAlignTimeSimVar(button.simVarValue);
+                                            }}
+                                            selected={adirsAlignTime === button.setting}
+                                        >
+                                            {button.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </div>
 
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span className="text-lg text-gray-300">DMC Self Test Time</span>
-                        <SelectGroup>
-                            {dmcSelfTestTimeButtons.map((button) => (
-                                <SelectItem
-                                    enabled
-                                    onSelect={() => setDmcSelfTestTime(button.setting)}
-                                    selected={dmcSelfTestTime === button.setting}
-                                >
-                                    {button.name}
-                                </SelectItem>
-                            ))}
-                        </SelectGroup>
-                    </div>
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span className="text-lg text-gray-300">DMC Self Test Time</span>
+                                <SelectGroup>
+                                    {dmcSelfTestTimeButtons.map((button) => (
+                                        <SelectItem
+                                            enabled
+                                            onSelect={() => setDmcSelfTestTime(button.setting)}
+                                            selected={dmcSelfTestTime === button.setting}
+                                        >
+                                            {button.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </div>
 
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span className="text-lg text-gray-300">Boarding Time</span>
-                        <SelectGroup>
-                            {boardingRateButtons.map((button) => (
-                                <SelectItem
-                                    enabled
-                                    onSelect={() => setBoardingRate(button.setting)}
-                                    selected={boardingRate === button.setting}
-                                >
-                                    {button.name}
-                                </SelectItem>
-                            ))}
-                        </SelectGroup>
-                    </div>
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span className="text-lg text-gray-300">Boarding Time</span>
+                                <SelectGroup>
+                                    {boardingRateButtons.map((button) => (
+                                        <SelectItem
+                                            enabled
+                                            onSelect={() => setBoardingRate(button.setting)}
+                                            selected={boardingRate === button.setting}
+                                        >
+                                            {button.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </div>
 
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span>
-                            <span className="text-lg text-gray-300">MCDU Keyboard Input</span>
-                            <span className="text-lg text-gray-500 ml-2">(unrealistic)</span>
-                        </span>
-                        <Toggle value={mcduInput === 'ENABLED'} onToggle={(value) => setMcduInput(value ? 'ENABLED' : 'DISABLED')} />
-                    </div>
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span>
+                                    <span className="text-lg text-gray-300">MCDU Keyboard Input</span>
+                                    <span className="text-lg text-gray-500 ml-2">(unrealistic)</span>
+                                </span>
+                                <Toggle value={mcduInput === 'ENABLED'} onToggle={(value) => setMcduInput(value ? 'ENABLED' : 'DISABLED')} />
+                            </div>
 
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span>
-                            <span className="text-lg text-gray-300">MCDU Focus Timeout (s)</span>
-                        </span>
-                        <SimpleInput
-                            className="w-30 ml-1.5 px-5 py-1.5 text-lg text-gray-300 rounded-lg bg-navy-light
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span>
+                                    <span className="text-lg text-gray-300">MCDU Focus Timeout (s)</span>
+                                </span>
+                                <SimpleInput
+                                    className="w-30 ml-1.5 px-5 py-1.5 text-lg text-gray-300 rounded-lg bg-navy-light
                             border-2 border-navy-light focus-within:outline-none focus-within:border-teal-light-contrast text-center disabled"
-                            value={mcduTimeout}
-                            noLabel
-                            min={5}
-                            max={120}
-                            disabled={(mcduInput !== 'ENABLED')}
-                            onChange={(event) => {
-                                if (!Number.isNaN(event) && parseInt(event) >= 5 && parseInt(event) <= 120) {
-                                    setMcduTimeout(event.trim());
-                                }
-                            }}
-                        />
-                    </div>
+                                    value={mcduTimeout}
+                                    noLabel
+                                    min={5}
+                                    max={120}
+                                    disabled={(mcduInput !== 'ENABLED')}
+                                    onChange={(event) => {
+                                        if (!Number.isNaN(event) && parseInt(event) >= 5 && parseInt(event) <= 120) {
+                                            setMcduTimeout(event.trim());
+                                        }
+                                    }}
+                                />
+                            </div>
 
-                    <div className="py-4 flex flex-row justify-between items-center">
-                        <span className="text-lg text-gray-300 mr-1">Separate Tiller from Rudder Inputs</span>
-                        <SelectGroup>
-                            {steeringSeparationButtons.map((button) => (
-                                <SelectItem
-                                    enabled
-                                    onSelect={() => setRealisticTiller(button.setting)}
-                                    selected={realisticTiller === button.setting}
-                                >
-                                    {button.name}
-                                </SelectItem>
-                            ))}
-                        </SelectGroup>
-                    </div>
-                </div>
-            </>
-        )}
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span className="text-lg text-gray-300 mr-1">Separate Tiller from Rudder Inputs</span>
+                                <SelectGroup>
+                                    {steeringSeparationButtons.map((button) => (
+                                        <SelectItem
+                                            enabled
+                                            onSelect={() => setRealisticTiller(button.setting)}
+                                            selected={realisticTiller === button.setting}
+                                        >
+                                            {button.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </div>
+
+                            <div className="py-4 flex flex-row justify-between items-center">
+                                <span className="text-lg text-gray-300 mr-1">Home Cockpit Mode</span>
+                                <SelectGroup>
+                                    {homeCockpitButtons.map((button) => (
+                                        <SelectItem
+                                            enabled
+                                            onSelect={() => setHomeCockpit(button.setting)}
+                                            selected={homeCockpit === button.setting}
+                                        >
+                                            {button.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </div>
+                        </div>
+                    </>
+                )}
             <ThrottleConfig isShown={showThrottleSettings} onClose={() => setShowThrottleSettings(false)} />
         </div>
     );
