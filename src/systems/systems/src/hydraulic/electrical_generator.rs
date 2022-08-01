@@ -13,11 +13,12 @@ use uom::si::{
 use crate::shared::{
     interpolation, low_pass_filter::LowPassFilter, pid::PidController, ControlValveCommand,
     EmergencyElectricalRatPushButton, EmergencyElectricalState, EmergencyGeneratorPower,
-    HydraulicGeneratorControlUnit, LgciuWeightOnWheels,
+    HydraulicGeneratorControlUnit, LgciuWeightOnWheels, SectionPressure,
 };
 
-use crate::simulation::{InitContext, VariableIdentifier};
-use crate::simulation::{SimulationElement, SimulatorWriter, UpdateContext, Write};
+use crate::simulation::{
+    InitContext, SimulationElement, SimulatorWriter, UpdateContext, VariableIdentifier, Write,
+};
 
 use std::time::Duration;
 
@@ -87,7 +88,7 @@ impl<const N: usize> GeneratorControlUnit<N> {
         &mut self,
         context: &UpdateContext,
         generator_feedback: &impl AngularSpeedSensor,
-        pressure_feedback: Pressure,
+        pressure_feedback: &impl SectionPressure,
         elec_emergency_state: &impl EmergencyElectricalState,
         rat_and_emer_gen_man_on: &impl EmergencyElectricalRatPushButton,
         lgciu: &impl LgciuWeightOnWheels,
@@ -98,7 +99,7 @@ impl<const N: usize> GeneratorControlUnit<N> {
             elec_emergency_state,
             rat_and_emer_gen_man_on,
             lgciu,
-            pressure_feedback,
+            pressure_feedback.pressure(),
         );
 
         self.update_valve_control(context);
@@ -194,13 +195,13 @@ impl HydraulicGeneratorMotor {
     pub fn update(
         &mut self,
         context: &UpdateContext,
-        pressure: Pressure,
+        section_pressure: &impl SectionPressure,
         gcu: &impl ControlValveCommand,
         emergency_generator: &impl EmergencyGeneratorPower,
     ) {
         self.update_valve_position(context, gcu);
         self.update_virtual_displacement();
-        self.update_speed(context, emergency_generator, pressure);
+        self.update_speed(context, emergency_generator, section_pressure.pressure());
         self.update_flow(context);
     }
 
@@ -363,7 +364,7 @@ impl EmergencyGeneratorPower for TestGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hydraulic::update_iterator::FixedStepLoop;
+    use crate::shared::update_iterator::FixedStepLoop;
     use crate::simulation::test::{SimulationTestBed, TestBed};
     use crate::simulation::{Aircraft, SimulationElement, SimulationElementVisitor};
     use std::time::Duration;
@@ -403,6 +404,32 @@ mod tests {
     impl EmergencyElectricalRatPushButton for TestRatManOn {
         fn is_pressed(&self) -> bool {
             self.is_pressed
+        }
+    }
+
+    struct TestHydraulicSection {
+        pressure: Pressure,
+    }
+    impl TestHydraulicSection {
+        fn new(pressure: Pressure) -> Self {
+            Self { pressure }
+        }
+
+        fn set_pressure(&mut self, pressure: Pressure) {
+            self.pressure = pressure;
+        }
+    }
+    impl SectionPressure for TestHydraulicSection {
+        fn pressure(&self) -> Pressure {
+            self.pressure
+        }
+
+        fn pressure_downstream_leak_valve(&self) -> Pressure {
+            self.pressure
+        }
+
+        fn is_pressure_switch_pressurised(&self) -> bool {
+            self.pressure.get::<psi>() > 1700.
         }
     }
 
@@ -457,7 +484,7 @@ mod tests {
         lgciu: TestLgciuSensors,
         rat_man_on: TestRatManOn,
         emergency_state: TestEmergencyState,
-        current_pressure: Pressure,
+        current_pressure: TestHydraulicSection,
 
         emergency_gen: HydraulicGeneratorMotor,
     }
@@ -470,7 +497,7 @@ mod tests {
                 rat_man_on: TestRatManOn::not_pressed(),
                 emergency_state: TestEmergencyState::not_in_emergency(),
 
-                current_pressure: Pressure::new::<psi>(2500.),
+                current_pressure: TestHydraulicSection::new(Pressure::new::<psi>(2500.)),
 
                 emergency_gen: HydraulicGeneratorMotor::new(
                     context,
@@ -492,7 +519,7 @@ mod tests {
         }
 
         fn set_hyd_pressure(&mut self, pressure: Pressure) {
-            self.current_pressure = pressure;
+            self.current_pressure.set_pressure(pressure)
         }
     }
     impl Aircraft for TestAircraft {
@@ -503,7 +530,7 @@ mod tests {
                 self.gcu.update(
                     &context.with_delta(cur_time_step),
                     &self.emergency_gen,
-                    self.current_pressure,
+                    &self.current_pressure,
                     &self.emergency_state,
                     &self.rat_man_on,
                     &self.lgciu,
@@ -511,7 +538,7 @@ mod tests {
 
                 self.emergency_gen.update(
                     &context.with_delta(cur_time_step),
-                    self.current_pressure,
+                    &self.current_pressure,
                     &self.gcu,
                     &TestGenerator::from_gcu(&self.gcu),
                 );

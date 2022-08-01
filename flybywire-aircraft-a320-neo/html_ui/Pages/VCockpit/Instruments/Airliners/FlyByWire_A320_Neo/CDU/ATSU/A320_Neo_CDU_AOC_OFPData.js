@@ -34,10 +34,12 @@ class CDUAocOfpData {
             }
         }
 
-        mcdu.refreshPageCallback = () => {
-            updateView();
-        };
-        SimVar.SetSimVarValue("L:FMC_UPDATE_CURRENT_PAGE", "number", 1);
+        // regular update while boarding/de-boarding is running
+        mcdu.page.SelfPtr = setTimeout(() => {
+            if (boardingStartedByUser) {
+                updateView();
+            }
+        }, mcdu.PageTimeout.Fast);
 
         const boardingStartedByUser = SimVar.GetSimVarValue("L:A32NX_BOARDING_STARTED_BY_USR", "Bool");
 
@@ -70,8 +72,8 @@ class CDUAocOfpData {
                     maxValue: station.seats,
                 },
                 async (value) => {
+                    setDefaultWeights(0, 0);
                     await SimVar.SetSimVarValue(`L:${station.simVar}_DESIRED`, "Number", value);
-                    await setTargetCargo(value, '');
                     updateView();
                 }
             );
@@ -98,28 +100,19 @@ class CDUAocOfpData {
             return;
         }
 
-        async function setTargetCargo(numberOfPax, simbriefCargo) {
-            const bagWeight = numberOfPax * 20;
-            const maxLoadInCargoHold = 9435; // from flight_model.cfg
-            const maxTotalPayload = 21800; // from flight_model.cfg
-            let loadableCargoWeight = undefined;
+        async function setTargetCargo(numberOfPax, simbriefFreight) {
+            const BAG_WEIGHT = SimVar.GetSimVarValue("L:A32NX_WB_PER_BAG_WEIGHT", "Number");
+            const bagWeight = numberOfPax * BAG_WEIGHT;
+            const maxLoadInCargoHold = Math.round(NXUnits.kgToUser(9435)); // from flight_model.cfg
+            const loadableCargoWeight = Math.min(bagWeight + parseInt(simbriefFreight), maxLoadInCargoHold);
 
-            if (simbriefCargo == 0) {
-                loadableCargoWeight = bagWeight;
-            } else if ((simbriefCargo + bagWeight + (numberOfPax * PAX_WEIGHT)) > maxTotalPayload) {
-                loadableCargoWeight = maxTotalPayload - (numberOfPax * PAX_WEIGHT);
-            } else {
-                loadableCargoWeight = simbriefCargo + bagWeight;
-            }
             let remainingWeight = loadableCargoWeight;
 
             async function fillCargo(station, percent, loadableCargoWeight) {
-
                 const weight = Math.round(percent * loadableCargoWeight);
                 station.load = weight;
                 remainingWeight -= weight;
                 await SimVar.SetSimVarValue(`L:${station.simVar}_DESIRED`, "Number", parseInt(weight));
-
             }
 
             await fillCargo(cargoStations['fwdBag'], .361 , loadableCargoWeight);
@@ -152,8 +145,9 @@ class CDUAocOfpData {
                     maxValue: MAX_SEAT_AVAILABLE,
                 },
                 async (value) => {
+                    setDefaultWeights(0, 0);
                     await setTargetPax(value);
-                    await setTargetCargo(value, '');
+                    await setTargetCargo(value, 0);
                     updateView();
                 }
             );
@@ -163,8 +157,8 @@ class CDUAocOfpData {
         function buildTotalCargoValue() {
             const currentLoad = Object.values(cargoStations).map((station) => SimVar.GetSimVarValue(`L:${station.simVar}`, "Number")).reduce((acc, cur) => acc + cur);
             const loadTarget = Object.values(cargoStations).map((station) => SimVar.GetSimVarValue(`L:${station.simVar}_DESIRED`, "Number")).reduce((acc, cur) => acc + cur);
-            const paxTarget = Object.values(paxStations).map((station) => SimVar.GetSimVarValue(`L:${station.simVar}_DESIRED`, "Number")).reduce((acc, cur) => acc + cur);
             const suffix = loadTarget === currentLoad ? "[color]green" : "[color]cyan";
+            const unitMaximum = (getUserUnit()) == "Kilograms" ? 9.5 : 20.8;
 
             return new CDU_SingleValueField(mcdu,
                 "number",
@@ -175,31 +169,29 @@ class CDUAocOfpData {
                     suffix: suffix,
                     maxLength: 4,
                     minValue: 0.0,
-                    maxValue: 9.4,
+                    maxValue: unitMaximum,
                 },
                 async (value) => {
-                    await setTargetPax(paxTarget);
-                    await setTargetCargo(paxTarget, (value * 1000));
+                    await setTargetCargo(0, (value * 1000));
                     updateView();
                 }
             );
-
         }
 
         const display = [
             ["W/B"],
             ["TOTAL PAX", "PAYLOAD"],
-            [buildTotalPaxValue(), `${Math.round(NXUnits.kgToUser(getTotalPayload()))}[color]green`],
+            [buildTotalPaxValue(), `${Math.round(getTotalPayload())}[color]green`],
             [paxStations.rows1_6.name, "ZFW"],
-            [buildStationValue(paxStations.rows1_6), `${Math.round(NXUnits.kgToUser(getZfw()))}[color]green`],
+            [buildStationValue(paxStations.rows1_6), `${Math.round(getZfw())}[color]green`],
             [paxStations.rows7_13.name, "ZFW CG"],
             [buildStationValue(paxStations.rows7_13), zfwcg],
             [paxStations.rows14_21.name, "CARGO HOLD"],
             [buildStationValue(paxStations.rows14_21), buildTotalCargoValue()],
             [paxStations.rows22_29.name, "OFP REQUEST"],
             [buildStationValue(paxStations.rows22_29), requestButton],
-            ["", "BOARDING"],
-            ["<AOC MENU", loadButton]
+            ["\xa0AOC MENU", "BOARDING\xa0"],
+            ["<RETURN", loadButton]
         ];
         mcdu.setTemplate(display);
 
@@ -208,11 +200,11 @@ class CDUAocOfpData {
         };
         mcdu.onRightInput[4] = () => {
             getSimBriefOfp(mcdu, updateView, () => {
+                setDefaultWeights(mcdu.simbrief.paxWeight, mcdu.simbrief.bagWeight);
                 setTargetPax(mcdu.simbrief.paxCount).then(() => {
-                    updateView();
-                });
-                setTargetCargo(mcdu.simbrief.paxCount, parseInt(mcdu.simbrief.cargo)).then(() => {
-                    updateView();
+                    setTargetCargo(mcdu.simbrief.bagCount, mcdu.simbrief.freight).then(() => {
+                        updateView();
+                    });
                 });
             });
         };
@@ -236,61 +228,4 @@ class CDUAocOfpData {
             CDUAocOfpData.ShowPage(mcdu);
         };
     }
-}
-
-const payloadConstruct = new A32NX_PayloadConstructor();
-const paxStations = payloadConstruct.paxStations;
-const cargoStations = payloadConstruct.cargoStations;
-
-const MAX_SEAT_AVAILABLE = 174;
-const PAX_WEIGHT = 84;
-const BAG_WEIGHT = 20;
-
-/**
-     * Calculate %MAC ZWFCG of all stations
-     */
-function getZfwcg() {
-    const currentPaxWeight = PAX_WEIGHT;
-
-    const leMacZ = -5.386; // Accurate to 3 decimals, replaces debug weight values
-    const macSize = 13.454; // Accurate to 3 decimals, replaces debug weight values
-
-    const emptyWeight = (SimVar.GetSimVarValue("EMPTY WEIGHT", "Kilograms"));
-    const emptyPosition = -8.75; // Value from flight_model.cfg
-    const emptyMoment = emptyPosition * emptyWeight;
-
-    const paxTotalMass = Object.values(paxStations).map((station) => (SimVar.GetSimVarValue(`L:${station.simVar}`, "Number") * currentPaxWeight)).reduce((acc, cur) => acc + cur, 0);
-    const paxTotalMoment = Object.values(paxStations).map((station) => (SimVar.GetSimVarValue(`L:${station.simVar}`, "Number") * currentPaxWeight) * station.position).reduce((acc, cur) => acc + cur, 0);
-
-    const cargoTotalMass = Object.values(cargoStations).map((station) => SimVar.GetSimVarValue(`PAYLOAD STATION WEIGHT:${station.stationIndex}`, "Number")).reduce((acc, cur) => acc + cur, 0);
-    const cargoTotalMoment = Object.values(cargoStations).map((station) => (SimVar.GetSimVarValue(`PAYLOAD STATION WEIGHT:${station.stationIndex}`, "Number") * station.position)).reduce((acc, cur) => acc + cur, 0);
-
-    const totalMass = emptyWeight + paxTotalMass + cargoTotalMass;
-    const totalMoment = emptyMoment + paxTotalMoment + cargoTotalMoment;
-
-    const cgPosition = totalMoment / totalMass;
-    const cgPositionToLemac = cgPosition - leMacZ;
-    const cgPercentMac = -100 * (cgPositionToLemac / macSize);
-
-    return cgPercentMac;
-}
-
-function getTotalCargo() {
-    const cargoTotalMass = Object.values(cargoStations).filter((station) => station.visible).map((station) => SimVar.GetSimVarValue(`PAYLOAD STATION WEIGHT:${station.stationIndex}`, "Number")).reduce((acc, cur) => acc + cur, 0);
-
-    return cargoTotalMass;
-}
-
-function getTotalPayload() {
-    const currentPaxWeight = PAX_WEIGHT;
-
-    const paxTotalMass = Object.values(paxStations).map((station) => (SimVar.GetSimVarValue(`L:${station.simVar}`, "Number") * currentPaxWeight)).reduce((acc, cur) => acc + cur, 0);
-    const cargoTotalMass = getTotalCargo();
-
-    return paxTotalMass + cargoTotalMass;
-}
-
-function getZfw() {
-    const emptyWeight = (SimVar.GetSimVarValue("EMPTY WEIGHT", "Kilograms"));
-    return emptyWeight + getTotalPayload();
 }

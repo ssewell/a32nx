@@ -395,7 +395,7 @@ class A320_Neo_FCU_Speed extends A320_Neo_FCU_Component {
         }
         SimVar.SetSimVarValue("K:SPEED_SLOT_INDEX_SET", "number", 1);
         this.inSelection = false;
-        this.isSelectedValueActive = false;
+        this.isSelectedValueActive = true;
         this.isTargetManaged = false;
     }
 
@@ -542,7 +542,6 @@ class A320_Neo_FCU_Heading extends A320_Neo_FCU_Component {
 
     onRotate() {
         const lateralMode = SimVar.GetSimVarValue("L:A32NX_FMA_LATERAL_MODE", "Number");
-        const lateralArmed = SimVar.GetSimVarValue("L:A32NX_FMA_LATERAL_ARMED", "Number");
         const isTRKMode = SimVar.GetSimVarValue("L:A32NX_TRK_FPA_MODE_ACTIVE", "Bool");
         const radioHeight = SimVar.GetSimVarValue("RADIO HEIGHT", "feet");
 
@@ -586,6 +585,12 @@ class A320_Neo_FCU_Heading extends A320_Neo_FCU_Component {
         clearTimeout(this._resetSelectionTimeout);
         this.isPreselectionModeActive = false;
         this.inSelection = false;
+        const lateralMode = SimVar.GetSimVarValue("L:A32NX_FMA_LATERAL_MODE", "Number");
+        const isManagedActive = this.isManagedModeActive(lateralMode);
+        if (isManagedActive) {
+            this.isSelectedValueActive = false;
+            SimVar.SetSimVarValue("L:A32NX_AUTOPILOT_HEADING_SELECTED", "Degrees", -1);
+        }
         SimVar.SetSimVarValue("K:A32NX.FCU_TO_AP_HDG_PUSH", "number", 0);
         SimVar.SetSimVarValue("K:HEADING_SLOT_INDEX_SET", "number", 2);
     }

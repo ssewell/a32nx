@@ -1,32 +1,35 @@
-import { VMLeg } from '@fmgc/guidance/lnav/legs/VM';
-import { Transition } from '@fmgc/guidance/lnav/transitions';
-import { Type1Transition } from '@fmgc/guidance/lnav/transitions/Type1';
-import { Leg } from '@fmgc/guidance/lnav/legs';
-import { TFLeg } from '@fmgc/guidance/lnav/legs/TF';
-import { GeoMath } from '@fmgc/flightplanning/GeoMath';
-import { MathUtils } from '@shared/MathUtils';
+// Copyright (c) 2021-2022 FlyByWire Simulations
+// Copyright (c) 2021-2022 Synaptic Simulations
+//
+// SPDX-License-Identifier: GPL-3.0
+
+import { Transition } from '@fmgc/guidance/lnav/Transition';
+import { FixedRadiusTransition } from '@fmgc/guidance/lnav/transitions/FixedRadiusTransition';
 import { Coordinates } from '@fmgc/flightplanning/data/geo';
 import { SegmentType } from '@fmgc/flightplanning/FlightPlanSegment';
-import { RFLeg } from '@fmgc/guidance/lnav/legs/RF';
-import { GuidanceParameters } from './ControlLaws';
+import { Leg } from '@fmgc/guidance/lnav/legs/Leg';
+import { Guidable } from '@fmgc/guidance/Guidable';
+import { LnavConfig } from '@fmgc/guidance/LnavConfig';
+import { CourseCaptureTransition } from '@fmgc/guidance/lnav/transitions/CourseCaptureTransition';
+import { DirectToFixTransitionGuidanceState, DirectToFixTransition } from '@fmgc/guidance/lnav/transitions/DirectToFixTransition';
+import { PathVector } from '@fmgc/guidance/lnav/PathVector';
+import { CALeg } from '@fmgc/guidance/lnav/legs/CA';
+import { isCourseReversalLeg, isHold } from '@fmgc/guidance/lnav/legs';
+import { maxBank } from '@fmgc/guidance/lnav/CommonGeometry';
+import { CILeg } from '@fmgc/guidance/lnav/legs/CI';
+import { CRLeg } from '@fmgc/guidance/lnav/legs/CR';
+import { VMLeg } from '@fmgc/guidance/lnav/legs/VM';
+import { TransitionPicker } from '@fmgc/guidance/lnav/TransitionPicker';
+import { ControlLaw, CompletedGuidanceParameters, LateralPathGuidance } from './ControlLaws';
 
-export const EARTH_RADIUS_NM = 3440.1;
-
-export interface Guidable {
-    /**
-     * Recomputes the guidable using new parameters
-     *
-     * @param tas Predicted true airspeed speed of the current leg (for a leg) or the next leg (for a transition) in knots
-     */
-    recomputeWithParameters(tas: Knots): void;
-
-    getGuidanceParameters(ppos: Coordinates, trueTrack: Degrees): GuidanceParameters | null;
-
-    getDistanceToGo(ppos: Coordinates): NauticalMiles;
-
-    isAbeam(ppos: Coordinates): boolean;
-
-    getPseudoWaypointLocation(distanceBeforeTerminator: NauticalMiles): LatLongData | undefined;
+function isGuidableCapturingPath(guidable: Guidable): boolean {
+    return !(
+        guidable instanceof CALeg
+        || guidable instanceof CILeg
+        || guidable instanceof CRLeg
+        || guidable instanceof VMLeg
+        || guidable instanceof CourseCaptureTransition
+    );
 }
 
 export class Geometry {
@@ -42,183 +45,364 @@ export class Geometry {
      */
     legs: Map<number, Leg>;
 
-    constructor(transitions: Map<number, Transition>, legs: Map<number, Leg>) {
+    public version = 0;
+
+    private listener = RegisterViewListener('JS_LISTENER_SIMVARS', null, true);
+
+    constructor(transitions: Map<number, Transition>, legs: Map<number, Leg>, private temp: boolean) {
         this.transitions = transitions;
         this.legs = legs;
+    }
+
+    public isComputed = false;
+
+    private cachedVectors = [];
+
+    public cachedVectorsVersion = 0;
+
+    public getAllPathVectors(activeLegIndex?: number): PathVector[] {
+        if (this.version === this.cachedVectorsVersion) {
+            return this.cachedVectors;
+        }
+
+        const transmitHoldEntry = !this.temp;
+
+        const ret = [];
+
+        for (const [index, leg] of this.legs.entries()) {
+            if (leg.isNull) {
+                continue;
+            }
+
+            // TODO don't transmit any course reversals when this side range >= 160
+            const transmitCourseReversal = LnavConfig.DEBUG_FORCE_INCLUDE_COURSE_REVERSAL_VECTORS || index === activeLegIndex || index === (activeLegIndex + 1);
+            if (activeLegIndex !== undefined) {
+                if (isCourseReversalLeg(leg) && !transmitCourseReversal) {
+                    continue;
+                }
+                if (index < activeLegIndex) {
+                    continue;
+                }
+            }
+            const legInboundTransition = leg.inboundGuidable instanceof Transition ? leg.inboundGuidable : null;
+
+            if (legInboundTransition && !legInboundTransition.isNull && (!isHold(leg) || transmitHoldEntry)) {
+                ret.push(...legInboundTransition.predictedPath);
+            }
+
+            if (leg) {
+                ret.push(...leg.predictedPath);
+            }
+        }
+
+        this.cachedVectors = ret;
+        this.cachedVectorsVersion = this.version;
+
+        return ret;
     }
 
     /**
      * Recomputes the guidable using new parameters
      *
-     * @param tas           Predicted true airspeed speed of the current leg (for a leg) or the next leg (for a transition) in knots
-     * @param activeLegIdx  Current active leg index
+     * @param tas             predicted true airspeed speed of the current leg (for a leg) or the next leg (for a transition) in knots
+     * @param gs              predicted ground speed of the current leg
+     * @param ppos            present position coordinates
+     * @param trueTrack       present true track
+     * @param activeLegIdx    current active leg index
+     * @param activeTransIdx  current active transition index
      */
-    recomputeWithParameters(tas: Knots, activeLegIdx: number) {
-        if (DEBUG) {
+    recomputeWithParameters(tas: Knots, gs: Knots, ppos: Coordinates, trueTrack: DegreesTrue, activeLegIdx: number, _activeTransIdx: number) {
+        this.version++;
+
+        if (LnavConfig.DEBUG_GEOMETRY) {
             console.log(`[FMS/Geometry] Recomputing geometry with current_tas: ${tas}kts`);
             console.time('geometry_recompute');
         }
 
-        for (const [index, leg] of this.legs.entries()) {
-            const predictWithCurrentSpeed = index === activeLegIdx;
-
-            let predictedLegTas: Knots;
-            // TODO remove this hack when VNAV can provide a proper prediction
-            if (!predictWithCurrentSpeed && leg instanceof TFLeg && leg.to.additionalData.predictedSpeed) {
-                predictedLegTas = leg.to.additionalData.predictedSpeed;
-            } else {
-                predictedLegTas = Math.max(tas, 150); // knots, i.e. nautical miles per hour
+        for (let i = activeLegIdx ?? 0; this.legs.get(i) || this.legs.get(i + 1); i++) {
+            if (!this.legs.has(i)) {
+                continue;
             }
 
-            if (DEBUG) {
-                let legString;
-                if (leg instanceof TFLeg) {
-                    legString = `TF(${leg.from.ident} -> ${leg.to.ident})`;
-                } else if (leg instanceof RFLeg) {
-                    legString = `RF(${leg.from.ident} -- ${leg.radius}° -> ${leg.to.ident})`;
-                } else if (leg instanceof VMLeg) {
-                    legString = `VM(${leg.bearing.toFixed(1)}°>`;
-                } else {
-                    legString = 'unknown()';
-                }
+            const leg = this.legs.get(i);
+            const wasNull = leg.isNull;
 
-                console.log(`[FMS/Geometry] Predicted leg ${legString} with tas: ${predictedLegTas}kts`);
+            this.computeLeg(i, activeLegIdx, ppos, trueTrack, tas, gs);
+
+            // If a leg became null/not null, we immediately recompute it to calculate the new guidables and transitions
+            if (!wasNull && leg.isNull || wasNull && !leg.isNull) {
+                this.computeLeg(i, activeLegIdx, ppos, trueTrack, tas, gs);
             }
-
-            leg.recomputeWithParameters(predictedLegTas);
-            this.transitions.get(index + 1)?.recomputeWithParameters(predictedLegTas);
         }
 
-        if (DEBUG) {
+        if (LnavConfig.DEBUG_GEOMETRY) {
             console.timeEnd('geometry_recompute');
         }
     }
 
-    /**
-     *
-     * @param ppos
-     * @param trueTrack
-     * @example
-     * const a = SimVar.GetSimVarValue("PLANE LATITUDE", "degree latitude"),
-     * const b = SimVar.GetSimVarValue("PLANE LONGITUDE", "degree longitude")
-     * const ppos = new LatLongAlt(a, b);
-     * const trueTrack = SimVar.GetSimVarValue("GPS GROUND TRUE TRACK", "degree");
-     * const gs = SimVar.GetSimVarValue('GPS GROUND SPEED', 'knots');
-     * getGuidanceParameters(ppos, trueTrack, gs);
-     */
-    getGuidanceParameters(ppos, trueTrack, gs) {
-        const activeLeg = this.legs.get(1);
-        const nextLeg = this.legs.get(2);
-
-        // first, check if we're abeam with one of the transitions (start or end)
-        const fromTransition = this.transitions.get(0);
-        if (fromTransition && fromTransition.isAbeam(ppos)) {
-            if (fromTransition instanceof Type1Transition && !fromTransition.isFrozen) {
-                fromTransition.isFrozen = true;
-            }
-
-            const rad = this.getRollAnticipationDistance(gs, fromTransition, activeLeg);
-            const dtg = fromTransition.getDistanceToGo(ppos);
-            SimVar.SetSimVarValue('L:A32NX_FG_RAD', 'number', rad);
-            SimVar.SetSimVarValue('L:A32NX_FG_DTG', 'number', dtg);
-            if (dtg <= rad) {
-                // console.log(`RAD for transition ${rad}`);
-                const params = fromTransition.getGuidanceParameters(ppos, trueTrack);
-                const toParams = activeLeg.getGuidanceParameters(ppos, trueTrack);
-                params.phiCommand = toParams.phiCommand ?? 0;
-                return params;
-            }
-            return fromTransition.getGuidanceParameters(ppos, trueTrack);
-        }
-
-        const toTransition = this.transitions.get(1);
-        if (toTransition) {
-            if (toTransition.isAbeam(ppos)) {
-                if (toTransition instanceof Type1Transition && !toTransition.isFrozen) {
-                    toTransition.isFrozen = true;
-                }
-
-                const rad = this.getRollAnticipationDistance(gs, toTransition, nextLeg);
-                const dtg = toTransition.getDistanceToGo(ppos);
-                SimVar.SetSimVarValue('L:A32NX_FG_RAD', 'number', rad);
-                SimVar.SetSimVarValue('L:A32NX_FG_DTG', 'number', dtg);
-                if (dtg <= rad) {
-                    // console.log(`RAD for transition ${rad}`);
-                    const params = toTransition.getGuidanceParameters(ppos, trueTrack);
-                    const toParams = nextLeg.getGuidanceParameters(ppos, trueTrack);
-                    params.phiCommand = toParams.phiCommand ?? 0;
-                    return params;
-                }
-                return toTransition.getGuidanceParameters(ppos, trueTrack);
-            }
-
-            if (activeLeg) {
-                const [itp] = toTransition.getTurningPoints();
-                // TODO this should be tidied up somewhere else
-                const unTravelled = Avionics.Utils.computeGreatCircleDistance(itp, activeLeg.terminatorLocation);
-                const rad = this.getRollAnticipationDistance(gs, activeLeg, toTransition);
-                const dtg = activeLeg.getDistanceToGo(ppos) - unTravelled;
-                SimVar.SetSimVarValue('L:A32NX_FG_RAD', 'number', rad);
-                SimVar.SetSimVarValue('L:A32NX_FG_DTG', 'number', dtg);
-                if (dtg <= rad) {
-                    // console.log(`RAD for transition ${rad}`);
-                    const params = activeLeg.getGuidanceParameters(ppos, trueTrack);
-                    const toParams = toTransition.getGuidanceParameters(ppos, trueTrack);
-                    params.phiCommand = toParams.phiCommand ?? 0;
-                    return params;
-                }
-            }
-        }
-
-        if (activeLeg) {
-            const dtg = activeLeg.getDistanceToGo(ppos);
-            SimVar.SetSimVarValue('L:A32NX_FG_DTG', 'number', dtg);
-            if (nextLeg) {
-                const rad = this.getRollAnticipationDistance(gs, activeLeg, nextLeg);
-                SimVar.SetSimVarValue('L:A32NX_FG_RAD', 'number', rad);
-                if (dtg <= rad) {
-                    // console.log(`RAD for next leg ${rad}`);
-                    const params = activeLeg.getGuidanceParameters(ppos, trueTrack);
-                    const toParams = nextLeg.getGuidanceParameters(ppos, trueTrack);
-                    params.phiCommand = toParams.phiCommand ?? 0;
-                    return params;
-                }
-            }
-
-            // otherwise perform straight point-to-point guidance for the first leg
-            return activeLeg.getGuidanceParameters(ppos, trueTrack);
-        }
-
-        return null;
+    static getLegPredictedTas(leg: Leg, currentTas: number) {
+        return Math.max(LnavConfig.DEFAULT_MIN_PREDICTED_TAS, leg.predictedTas ?? currentTas);
     }
 
-    getRollAnticipationDistance(gs, from: Leg | Transition, to: Leg | Transition) {
-        if (!from.isCircularArc && !to.isCircularArc) {
+    static getLegPredictedGs(leg: Leg, currentGs: number) {
+        return Math.max(LnavConfig.DEFAULT_MIN_PREDICTED_TAS, leg.predictedGs ?? currentGs);
+    }
+
+    private computeLeg(index: number, activeLegIdx: number, ppos: Coordinates, trueTrack: DegreesTrue, tas: Knots, gs: Knots) {
+        const prevLeg = this.legs.get(index - 1);
+        const leg = this.legs.get(index);
+        const nextLeg = this.legs.get(index + 1);
+        const nextNextLeg = this.legs.get(index + 2);
+
+        const inboundTransition = this.transitions.get(index - 1);
+        const outboundTransition = this.transitions.get(index);
+
+        const legPredictedTas = Geometry.getLegPredictedTas(leg, tas);
+        const legPredictedGs = Geometry.getLegPredictedGs(leg, gs);
+
+        // If the leg is null, we compute the following:
+        //  - transition from prevLeg to nextLeg
+        //  - nextLeg
+        //  - transition from nextLeg to nextNextLeg (in order to compute nextLeg)
+        if (leg?.isNull) {
+            if (nextLeg) {
+                let newInboundTransition: Transition;
+                if ((LnavConfig.NUM_COMPUTED_TRANSITIONS_AFTER_ACTIVE === -1) || index - activeLegIdx < LnavConfig.NUM_COMPUTED_TRANSITIONS_AFTER_ACTIVE) {
+                    newInboundTransition = TransitionPicker.forLegs(prevLeg, nextLeg);
+                }
+
+                let newOutboundTransition: Transition;
+                if (nextNextLeg && (LnavConfig.NUM_COMPUTED_TRANSITIONS_AFTER_ACTIVE === -1) || (index + 1) - activeLegIdx < LnavConfig.NUM_COMPUTED_TRANSITIONS_AFTER_ACTIVE) {
+                    newOutboundTransition = TransitionPicker.forLegs(nextLeg, nextNextLeg);
+                }
+
+                if (newInboundTransition && prevLeg) {
+                    const prevLegPredictedLegTas = Geometry.getLegPredictedTas(prevLeg, tas);
+                    const prevLegPredictedLegGs = Geometry.getLegPredictedGs(prevLeg, gs);
+
+                    newInboundTransition.setNeighboringGuidables(prevLeg, nextLeg);
+                    newInboundTransition.recomputeWithParameters(
+                        activeLegIdx === index,
+                        prevLegPredictedLegTas,
+                        prevLegPredictedLegGs,
+                        ppos,
+                        trueTrack,
+                    );
+                }
+
+                const nextLegPredictedLegTas = Geometry.getLegPredictedTas(nextLeg, tas);
+                const nextLegPredictedLegGs = Geometry.getLegPredictedGs(nextLeg, gs);
+
+                nextLeg.setNeighboringGuidables(newInboundTransition ?? prevLeg, newOutboundTransition ?? nextNextLeg);
+                nextLeg.recomputeWithParameters(
+                    activeLegIdx === index,
+                    nextLegPredictedLegTas,
+                    nextLegPredictedLegGs,
+                    ppos,
+                    trueTrack,
+                );
+
+                if (newOutboundTransition) {
+                    newOutboundTransition.setNeighboringGuidables(nextLeg, nextNextLeg);
+                    newOutboundTransition.recomputeWithParameters(
+                        activeLegIdx === index + 1,
+                        nextLegPredictedLegTas,
+                        nextLegPredictedLegGs,
+                        ppos,
+                        trueTrack,
+                    );
+
+                    nextLeg.recomputeWithParameters(
+                        activeLegIdx === index,
+                        nextLegPredictedLegTas,
+                        nextLegPredictedLegGs,
+                        ppos,
+                        trueTrack,
+                    );
+                }
+            }
+        }
+
+        if (inboundTransition && prevLeg) {
+            const prevLegPredictedLegTas = Geometry.getLegPredictedTas(prevLeg, tas);
+            const prevLegPredictedLegGs = Geometry.getLegPredictedGs(prevLeg, gs);
+
+            inboundTransition.setNeighboringGuidables(prevLeg, leg);
+            inboundTransition.setNeighboringLegs(prevLeg, leg);
+            inboundTransition.recomputeWithParameters(
+                activeLegIdx === index,
+                prevLegPredictedLegTas,
+                prevLegPredictedLegGs,
+                ppos,
+                trueTrack,
+            );
+        }
+
+        // Compute leg and outbound if previous leg isn't null (we already computed 1 leg forward the previous iteration)
+        if (!(prevLeg && prevLeg.isNull)) {
+            leg.setNeighboringGuidables(inboundTransition ?? prevLeg, outboundTransition ?? nextLeg);
+            leg.recomputeWithParameters(
+                activeLegIdx === index,
+                legPredictedTas,
+                legPredictedGs,
+                ppos,
+                trueTrack,
+            );
+
+            if (outboundTransition && nextLeg) {
+                outboundTransition.setNeighboringGuidables(leg, nextLeg);
+                outboundTransition.setNeighboringLegs(leg, nextLeg);
+                outboundTransition.recomputeWithParameters(
+                    activeLegIdx === index + 1,
+                    legPredictedTas,
+                    legPredictedGs,
+                    ppos,
+                    trueTrack,
+                );
+
+                // Since the outbound transition can have TAD, we recompute the leg again to make sure the end point is at the right place for this cycle
+                leg.setNeighboringGuidables(inboundTransition ?? prevLeg, outboundTransition);
+                leg.recomputeWithParameters(
+                    activeLegIdx === index,
+                    legPredictedTas,
+                    legPredictedGs,
+                    ppos,
+                    trueTrack,
+                );
+            }
+        }
+    }
+
+    /**
+     * @param activeLegIdx
+     * @param ppos
+     * @param trueTrack
+     * @param gs
+     * @param tas
+     */
+    getGuidanceParameters(activeLegIdx: number, ppos: Coordinates, trueTrack: DegreesTrue, gs: Knots, tas: Knots): CompletedGuidanceParameters | undefined {
+        const activeLeg = this.legs.get(activeLegIdx);
+        const nextLeg = this.legs.get(activeLegIdx + 1);
+
+        // TODO handle in guidance controller state
+        const autoSequencing = !activeLeg?.disableAutomaticSequencing;
+
+        let activeGuidable: Guidable | null = null;
+        let nextGuidable: Guidable | null = null;
+
+        // first, check if we're abeam with one of the transitions (start or end)
+        const fromTransition = this.transitions.get(activeLegIdx - 1);
+        const toTransition = this.transitions.get(activeLegIdx);
+        if (fromTransition && !fromTransition.isNull && fromTransition.isAbeam(ppos)) {
+            if (!fromTransition.isFrozen) {
+                fromTransition.freeze();
+            }
+
+            // Since CA leg CourseCaptureTransition inbound starts at PPOS, we always consider the CA leg as the active guidable
+            if (fromTransition instanceof CourseCaptureTransition && activeLeg instanceof CALeg) {
+                activeGuidable = activeLeg;
+                nextGuidable = toTransition;
+            } else {
+                activeGuidable = fromTransition;
+                nextGuidable = activeLeg;
+            }
+        } else if (toTransition && !toTransition.isNull && autoSequencing) {
+            // TODO need to check that the previous leg is actually flown first...
+            if (toTransition.isAbeam(ppos)) {
+                if (toTransition instanceof FixedRadiusTransition && !toTransition.isFrozen) {
+                    toTransition.freeze();
+                }
+
+                activeGuidable = toTransition;
+                nextGuidable = nextLeg;
+            } else if (activeLeg) {
+                activeGuidable = activeLeg;
+                nextGuidable = toTransition;
+            }
+        } else if (activeLeg) {
+            activeGuidable = activeLeg;
+            if (nextLeg && autoSequencing) {
+                nextGuidable = nextLeg;
+            }
+        }
+
+        // figure out guidance params and roll anticipation
+        let guidanceParams: CompletedGuidanceParameters;
+        let rad;
+        let dtg;
+        if (activeGuidable) {
+            const phiLimit = maxBank(tas, isGuidableCapturingPath(activeGuidable));
+            guidanceParams = {
+                ...activeGuidable.getGuidanceParameters(ppos, trueTrack, tas, gs),
+                phiLimit,
+            };
+            dtg = activeGuidable.getDistanceToGo(ppos);
+
+            if (activeGuidable && nextGuidable) {
+                rad = this.getGuidableRollAnticipationDistance(gs, activeGuidable, nextGuidable);
+                if (rad > 0 && dtg <= rad) {
+                    const nextGuidanceParams = nextGuidable.getGuidanceParameters(ppos, trueTrack, tas, gs);
+
+                    if (nextGuidanceParams.law === ControlLaw.LATERAL_PATH) {
+                        (guidanceParams as LateralPathGuidance).phiCommand = nextGuidanceParams?.phiCommand ?? 0;
+                    }
+                }
+            }
+        }
+
+        if (LnavConfig.DEBUG_GUIDANCE) {
+            this.listener.triggerToAllSubscribers('A32NX_FM_DEBUG_LNAV_STATUS',
+                // eslint-disable-next-line prefer-template
+                'A32NX FMS LNAV STATUS\n'
+                + `XTE ${(guidanceParams as LateralPathGuidance).crossTrackError?.toFixed(3) ?? '(NO DATA)'}\n`
+                + `TAE ${(guidanceParams as LateralPathGuidance).trackAngleError?.toFixed(3) ?? '(NO DATA)'}\n`
+                + `PHI ${(guidanceParams as LateralPathGuidance).phiCommand?.toFixed(5) ?? '(NO DATA)'}\n`
+                + '---\n'
+                + `CURR GUIDABLE ${activeGuidable?.repr ?? '---'}\n`
+                + `CURR GUIDABLE DTG ${dtg?.toFixed(3) ?? '---'}\n`
+                + ((activeGuidable instanceof DirectToFixTransition) ? `DFX STATE ${DirectToFixTransitionGuidanceState[(activeGuidable as DirectToFixTransition).state]}\n` : '')
+                + '---\n'
+                + `RAD GUIDABLE ${nextGuidable?.repr ?? '---'}\n`
+                + `RAD DISTANCE ${rad?.toFixed(3) ?? '---'}\n`
+                + '---\n'
+                + `L0 ${this.legs.get(activeLegIdx - 1)?.repr ?? '---'}\n`
+                + `T0 ${this.transitions.get(activeLegIdx - 1)?.repr ?? '---'}\n`
+                + `L1 ${this.legs.get(activeLegIdx)?.repr ?? '---'}\n`
+                + `T1 ${this.transitions.get(activeLegIdx)?.repr ?? '---'}\n`
+                + `L2 ${this.legs.get(activeLegIdx + 1)?.repr ?? '---'}\n`);
+        }
+
+        return guidanceParams;
+    }
+
+    getGuidableRollAnticipationDistance(gs: Knots, from: Guidable, to: Guidable) {
+        if (!from.endsInCircularArc && !to.startsInCircularArc) {
             return 0;
         }
 
-        // convert ground speed to m/s
-        const groundSpeedMeterPerSecond = gs * (463 / 900);
-
         // get nominal phi from previous and next leg
-        const phiNominalFrom = from.getNominalRollAngle(groundSpeedMeterPerSecond);
-        const phiNominalTo = to.getNominalRollAngle(groundSpeedMeterPerSecond);
+        const phiNominalFrom = from.endsInCircularArc ? from.getNominalRollAngle(gs) : 0;
+        const phiNominalTo = to.startsInCircularArc ? to.getNominalRollAngle(gs) : 0;
 
+        // TODO consider case where RAD > transition distance
+
+        return Geometry.getRollAnticipationDistance(gs, phiNominalFrom, phiNominalTo);
+    }
+
+    static getRollAnticipationDistance(gs: Knots, bankA: Degrees, bankB: Degrees): NauticalMiles {
         // calculate delta phi
-        const deltaPhi = Math.abs(phiNominalTo - phiNominalFrom);
+        const deltaPhi = Math.abs(bankA - bankB);
 
         // calculate RAD
         const maxRollRate = 5; // deg / s, TODO picked off the wind
         const k2 = 0.0038;
         const rad = gs / 3600 * (Math.sqrt(1 + 2 * k2 * 9.81 * deltaPhi / maxRollRate) - 1) / (k2 * 9.81);
 
-        // TODO consider case where RAD > transition distance
-
         return rad;
     }
 
-    getDistanceToGo(ppos): number | null {
-        const activeLeg = this.legs.get(1);
+    getDistanceToGo(activeLegIdx: number, ppos: LatLongAlt): number | null {
+        const activeLeg = this.legs.get(activeLegIdx);
         if (activeLeg) {
             return activeLeg.getDistanceToGo(ppos);
         }
@@ -226,26 +410,19 @@ export class Geometry {
         return null;
     }
 
-    shouldSequenceLeg(ppos: LatLongAlt): boolean {
-        const activeLeg = this.legs.get(1);
+    shouldSequenceLeg(activeLegIdx: number, ppos: LatLongAlt): boolean {
+        const activeLeg = this.legs.get(activeLegIdx);
+        const inboundTransition = this.transitions.get(activeLegIdx - 1);
 
-        // VM legs do not connect to anything and do not have a transition after them - we never sequence them
-        if (activeLeg instanceof VMLeg) {
+        // Restrict sequencing in cases where we are still in inbound transition. Make an exception for very short legs as the transition could be overshooting.
+        if (!inboundTransition?.isNull && inboundTransition?.isAbeam(ppos) && activeLeg.distance > 0.01) {
             return false;
         }
 
-        const transitionAfterActiveLeg = this.transitions.get(1);
-        if (activeLeg instanceof TFLeg && transitionAfterActiveLeg instanceof Type1Transition) {
-            // Sequence at ITP
-            const [transItp] = transitionAfterActiveLeg.getTurningPoints();
+        const dtg = activeLeg.getDistanceToGo(ppos);
 
-            const legBearing = activeLeg.bearing;
-            const bearingToTransItp = Avionics.Utils.computeGreatCircleHeading(ppos, transItp);
-            const innerAngleWithTransItp = MathUtils.smallCrossingAngle(legBearing, bearingToTransItp);
-
-            const directedDtgToTransItp = GeoMath.directedDistanceToGo(ppos, transItp, innerAngleWithTransItp);
-
-            return directedDtgToTransItp < 0;
+        if (dtg <= 0 || activeLeg.isNull) {
+            return true;
         }
 
         if (activeLeg) {
@@ -253,6 +430,12 @@ export class Geometry {
         }
 
         return false;
+    }
+
+    onLegSequenced(_sequencedLeg: Leg, nextLeg: Leg, followingLeg: Leg): void {
+        if (isCourseReversalLeg(nextLeg) || isCourseReversalLeg(followingLeg)) {
+            this.version++;
+        }
     }
 
     legsInSegment(segmentType: SegmentType): Map<number, Leg> {
@@ -268,7 +451,7 @@ export class Geometry {
     }
 
     /**
-     * Returns DTG for a complete leg path, taking into account transitions (including split Type 1)
+     * Returns DTG for a complete leg path, taking into account transitions (including split FXR)
      *
      * @param ppos      present position
      * @param leg       the leg guidable
@@ -279,7 +462,7 @@ export class Geometry {
         ppos: LatLongData,
         leg: Leg,
         inbound?: Transition,
-        outbound?: Type1Transition,
+        outbound?: Transition,
     ) {
         const [, legPartLength, outboundTransLength] = Geometry.completeLegPathLengths(
             leg,
@@ -295,11 +478,11 @@ export class Geometry {
             return inbound.getDistanceToGo(ppos) + legPartLength + outboundTransLength;
         }
 
-        return (leg.getDistanceToGo(ppos) - (outbound && outbound instanceof Type1Transition ? outbound.unflownDistance : 0)) + outboundTransLength;
+        return (leg.getDistanceToGo(ppos) - (outbound && outbound instanceof FixedRadiusTransition ? outbound.unflownDistance : 0)) + outboundTransLength;
     }
 
     /**
-     * Returns lengths of the different segments of a leg, taking into account transitions (including split Type 1)
+     * Returns lengths of the different segments of a leg, taking into account transitions (including split FXR)
      *
      * @param leg       the leg guidable
      * @param inbound   the inbound transition guidable, if present
@@ -308,19 +491,20 @@ export class Geometry {
     static completeLegPathLengths(
         leg: Leg,
         inbound?: Transition,
-        outbound?: Type1Transition,
+        outbound?: Transition,
     ): [number, number, number] {
         let inboundLength = 0;
-        let legPartLength = 0;
         let outboundLength = 0;
 
-        if (outbound && outbound instanceof Type1Transition) {
-            // Type I transitions are split between the prev and next legs
-            outboundLength = outbound.distance / 2;
+        if (outbound) {
+            if (outbound instanceof FixedRadiusTransition) {
+                // Type I transitions are split between the prev and next legs
+                outboundLength = outbound.distance / 2;
+            }
         }
 
         if (inbound) {
-            if (inbound instanceof Type1Transition) {
+            if (inbound instanceof FixedRadiusTransition) {
                 // Type I transitions are split between the prev and next legs
                 inboundLength = inbound.distance / 2;
             } else {
@@ -328,8 +512,6 @@ export class Geometry {
             }
         }
 
-        legPartLength = leg.distance - (inbound instanceof Type1Transition ? inbound.unflownDistance : inboundLength) - (outbound instanceof Type1Transition ? outbound.unflownDistance : 0);
-
-        return [inboundLength, legPartLength, outboundLength];
+        return [inboundLength, leg.distance, outboundLength];
     }
 }

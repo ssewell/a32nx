@@ -2,18 +2,53 @@
 
 ## Contents
 
-1. [Uncategorized](#uncategorized)
-1. [EIS Display System](#eis-display-system)
-1. [Fly-By-Wire System](#fly-by-wire-system)
-1. [ADIRS](#adirs)
-1. [Autopilot System](#autopilot-system)
-1. [Autothrust System](#autothrust-system)
-1. [Throttle Mapping System](#throttle-mapping-system)
-1. [Engine and FADEC System](#engine-and-fadec-system)
-1. [Air Conditioning / Pressurisation / Ventilation](#air-conditioning--pressurisation--ventilation)
-1. [Pneumatic](#pneumatic)
+- [A320neo Local SimVars](#a320neo-local-simvars)
+  - [Contents](#contents)
+  - [Uncategorized](#uncategorized)
+  - [EIS Display System](#eis-display-system)
+  - [Fly-By-Wire System](#fly-by-wire-system)
+  - [ADIRS](#adirs)
+  - [Radio Receivers](#radio-receivers)
+  - [Flight Management System](#flight-management-system)
+  - [Autopilot System](#autopilot-system)
+  - [Autothrust System](#autothrust-system)
+  - [Throttle Mapping System](#throttle-mapping-system)
+  - [Engine and FADEC System](#engine-and-fadec-system)
+  - [Air Conditioning / Pressurisation / Ventilation](#air-conditioning--pressurisation--ventilation)
+  - [Pneumatic](#pneumatic)
+  - [Flaps / Slats (ATA 27)](#flaps--slats-ata-27)
+  - [Landing Gear (ATA 32)](#landing-gear-ata-32)
+  - [ATC (ATA 34)](#atc-ata-34)
+  - [Radio Altimeter (ATA 34)](#radio-altimeter-ata-34)
 
 ## Uncategorized
+
+- A32NX_IS_READY
+    - Bool
+    - Indicates that the JavaScript part is ready
+
+- A32NX_IS_STATIONARY
+    - Bool
+    - Aircraft is stationary in relation to the speed of the first surface directly underneath it. (stationary on a
+      carrier that is moving would be considered stationary)
+
+- A32NX_GND_EQP_IS_VISIBLE
+    - Bool
+    - Indicates if any GND equipment is visible or not
+
+- A32NX_START_STATE
+    - Enum
+    - Indicates the state in which MSFS started
+    - State | Value
+            --- | ---
+      Hangar | 1
+      Apron | 2
+      Taxi | 3
+      Runway | 4
+      Climb | 5
+      Cruise | 6
+      Approach | 7
+      Final | 8
 
 - A32NX_NO_SMOKING_MEMO
     - Boolean that determines whether the NO SMOKING memo should be visible on the upper ECAM
@@ -26,8 +61,10 @@
 - A32NX_REPORTED_BRAKE_TEMPERATURE_{1,2,3,4}
     - celsius
     - represents the reported brake temperature of the rear wheels by the sensor.
-    - It can be different from the brake temperature when the brake fan has been used, because the brake fan will cool the sensor more than the brakes
-    - (which have much more energy to dissipate) therefore giving potentially erroneous readings that the pilots must take into account
+    - It can be different from the brake temperature when the brake fan has been used, because the brake fan will cool
+      the sensor more than the brakes
+    - (which have much more energy to dissipate) therefore giving potentially erroneous readings that the pilots must
+      take into account
 
 - A32NX_BRAKE_FAN
     - boolean
@@ -41,14 +78,6 @@
     - boolean
     - whether one of the brakes are hot (>300°C)
 
-- XMLVAR_Auto
-    - Used in the `.flt` files to set a default value for the ATC 3 way switch on the TCAS panel
-    - Maps to the `I:XMLVAR_Auto` variable which is the actual backing var for the switch
-
-- XMLVAR_ALT_MODE_REQUESTED
-    - Used in the `.flt` files to set a default value for the ALT RPTG 2 way switch on the TCAS panel
-    - Maps to the `I:XMLVAR_ALT_MODE_REQUESTED` variable which is the actual backing var for the switch
-
 - A32NX_KNOB_OVHD_AIRCOND_XBLEED_Position
     - Position (0-2)
     - 0 is SHUT, 1 is AUTO, 2 is OPEN
@@ -56,22 +85,6 @@
 - A32NX_KNOB_OVHD_AIRCOND_PACKFLOW_Position
     - Position (0-2)
     - 0 is LO, 1 is NORM, 2 is HI
-
-- A32NX_AIRCOND_PACK1_FAULT
-    - Bool
-    - True if fault in pack 1
-
-- A32NX_AIRCOND_PACK1_TOGGLE
-    - Bool
-    - True if pack 1 is on
-
-- A32NX_AIRCOND_PACK2_FAULT
-    - Bool
-    - True if fault in pack 2
-
-- A32NX_AIRCOND_PACK2_TOGGLE
-    - Bool
-    - True if pack 2 is on
 
 - A32NX_AIRCOND_HOTAIR_FAULT
     - Bool
@@ -199,7 +212,7 @@
     - Bool
     - True if "BLUE PUMP OVRD" switch is off
 
-- A32NX_OVHD_HYD_LEAK_MEASUREMENT_G
+- A32NX_OVHD_HYD_LEAK_MEASUREMENT_G_PB_IS_AUTO
     - Bool
     - True if "HYD LEAK MEASUREMENT G" switch is on
 
@@ -207,7 +220,7 @@
     - Bool
     - True if "HYD LEAK MEASUREMENT G" switch lock is down
 
-- A32NX_OVHD_HYD_LEAK_MEASUREMENT_B
+- A32NX_OVHD_HYD_LEAK_MEASUREMENT_B_PB_IS_AUTO
     - Bool
     - True if "HYD LEAK MEASUREMENT B" switch is on
 
@@ -215,7 +228,7 @@
     - Bool
     - True if "HYD LEAK MEASUREMENT B" switch lock is down
 
-- A32NX_OVHD_HYD_LEAK_MEASUREMENT_Y
+- A32NX_OVHD_HYD_LEAK_MEASUREMENT_Y_PB_IS_AUTO
     - Bool
     - True if "HYD LEAK MEASUREMENT Y" switch is on
 
@@ -252,49 +265,49 @@
     - Bool
     - True when the FWC decides that flight phase inhibits should be overridden (and ignored)
 
-- A32NX_VSPEEDS_VS
+- A32NX_SPEEDS_VS
     - Number
     - Current config stall speed
     - is mach corrected
 
-- A32NX_VSPEEDS_VLS
+- A32NX_SPEEDS_VLS
     - Number
     - Current config minimum selectable speed
     - is mach corrected
 
-- A32NX_VSPEEDS_F
+- A32NX_SPEEDS_F
     - Number
     - F-Speed (approach)
 
-- A32NX_VSPEEDS_S
+- A32NX_SPEEDS_S
     - Number
     - S-Speed (approach)
 
-- A32NX_VSPEEDS_GD
+- A32NX_SPEEDS_GD
     - Number
     - Green Dot speed (clean config or O)
     - is mach corrected
 
-- A32NX_VSPEEDS_LANDING_CONF3
+- A32NX_SPEEDS_LANDING_CONF3
     - Bool
     - True if FLAPS 3 is selected in perf page
 
-- A32NX_VSPEEDS_TO_CONF
+- A32NX_SPEEDS_TO_CONF
     - Number
     - Flaps config for TakeOff, 1, 2 or 3
 
-- A32NX_VSPEEDS_V2
+- A32NX_SPEEDS_V2
     - Number
     - TakeOff V2 Speed calculated based on A32NX_VSPEEDS_TO_CONF config
 
-- A32NX_VSPEEDS_VLS_APP
+- A32NX_SPEEDS_VLS_APP
     - Number
     - vls calculated for config full whether A32NX_VSPEEDS_LANDING_CONF3 or not
     - is mach corrected
 
-- A32NX_VSPEEDS_VAPP
+- A32NX_SPEEDS_VAPP
     - Number
-    - vapp calculated for config full  whether A32NX_VSPEEDS_LANDING_CONF3 or not
+    - vapp calculated for config full whether A32NX_VSPEEDS_LANDING_CONF3 or not
     - is mach corrected
 
 - A32NX_SPEEDS_ALPHA_PROTECTION
@@ -426,24 +439,24 @@
     - Indicates whether the door slides are armed or not
 
 - A32NX_RAIN_REPELLENT_RIGHT_ON
-  - Bool
-  - True if rain repellent is activated on the right windshield.
+    - Bool
+    - True if rain repellent is activated on the right windshield.
 
 - A32NX_RAIN_REPELLENT_LEFT_ON
-  - Bool
-  - True if rain repellent is activated on the left windshield.
+    - Bool
+    - True if rain repellent is activated on the left windshield.
 
 - A32NX_RCDR_TEST
-  - Bool
-  - True if RCDR being tested.
+    - Bool
+    - True if RCDR being tested.
 
 - A32NX_RADAR_MULTISCAN_AUTO
-  - Bool
-  - True if multiscan switch is set to AUTO.
+    - Bool
+    - True if multiscan switch is set to AUTO.
 
 - A32NX_RADAR_GCS_AUTO
-  - Bool
-  - True if GCS switch is set to AUTO.
+    - Bool
+    - True if GCS switch is set to AUTO.
 
 - A32NX_OXYGEN_MASKS_DEPLOYED
     - Bool
@@ -754,6 +767,14 @@
         - BLUE
         - YELLOW
 
+- A32NX_HYD_{loop_name}_SYSTEM_1_SECTION_PRESSURE_SWITCH
+    - Boolean
+    - Current pressure switch state in {loop_name} hydraulic circuit downstream of leak valve
+    - {loop_name}
+        - GREEN
+        - BLUE
+        - YELLOW
+
 - A32NX_HYD_{loop_name}_PUMP_1_SECTION_PRESSURE
     - Psi
     - Current pressure in the pump section of the {loop_name} hydraulic circuit
@@ -773,6 +794,14 @@
 - A32NX_HYD_{loop_name}_RESERVOIR_LEVEL_IS_LOW
     - Boolean
     - Low level switch of {loop_name} hydraulic circuit reservoir indicates low state
+    - {loop_name}
+        - GREEN
+        - BLUE
+        - YELLOW
+
+- A32NX_HYD_{loop_name}_RESERVOIR_AIR_PRESSURE_IS_LOW
+    - Boolean
+    - Low air pressure switch of {loop_name} hydraulic circuit reservoir indicates low state
     - {loop_name}
         - GREEN
         - BLUE
@@ -836,14 +865,15 @@
 - A32NX_REALISTIC_TILLER_ENABLED
     - Bool
     - 0 for legacy mode (steering with rudder). 1 for realistic mode with tiller axis
-        Tiller axis to be binded on "ENGINE 4 MIXTURE AXIS"
+      Tiller axis to be binded on "ENGINE 4 MIXTURE AXIS"
 
 - A32NX_HOME_COCKPIT_ENABLED
     - Bool
     - 1 to enable Home Cockpit mode which:
-      - Removes backlight bleed from the PFD, ND, and ECAM displays
-      - Removes reflection from the ISIS
-    - Useful for home cockpits that use the sim's built-in pop-out feature and do not wish to have these effects present on their displays.
+        - Removes backlight bleed from the PFD, ND, and ECAM displays
+        - Removes reflection from the ISIS
+    - Useful for home cockpits that use the sim's built-in pop-out feature and do not wish to have these effects present
+      on their displays.
 
 - A32NX_HYD_{loop_name}_EPUMP_LOW_PRESS
     - Bool
@@ -863,20 +893,25 @@
     - Bool
     - Power Transfer Unit can receive fluid from yellow and green circuits
 
-- A32NX_HYD_PTU_ACTIVE_{motor_side}
-    - Bool
-    - Power Transfer Unit is trying to transfer hydraulic power from either yellow to green (R2L) or green to yellow (L2R) circuits
-    - {motor_side}
-        - L2R
-        - R2L
-
-- A32NX_HYD_PTU_MOTOR_FLOW
-    - Gallon per second
-    - Power Transfer Unit instantaneous flow in motor side
-
 - A32NX_HYD_PTU_SHAFT_RPM
     - Revolutions per minute
     - Power Transfer Unit shaft rpm
+
+- A32NX_HYD_PTU_BARK_STRENGTH
+    - Number
+    - 0 no PTU. 1 to 5 indicates barking sound power level.
+
+- A32NX_HYD_PTU_CONTINUOUS_MODE
+    - Bool
+    - Power Transfer Unit is rotating continuously
+
+- A32NX_HYD_PTU_DEV_DEACTIVATION_DELTA
+    - Psi
+    - Write to this simvar to force a deactivation delta pressure for Power Transfer Unit
+
+- A32NX_HYD_PTU_DEV_EFFICIENCY
+    - Number
+    - Write to this simvar to force an efficiency value for Power Transfer Unit
 
 - A32NX_OVHD_HYD_RAT_MAN_ON_IS_PRESSED
     - Bool
@@ -939,6 +974,19 @@
         - 2: Autobrake in MED
         - 3: Autobrake in MAX
 
+- A32NX_AUTOBRAKES_ARMED_MODE_SET
+    - Number
+    - Requests an autobrake mode
+        - -1: (technical state not requesting anything)
+        - 0: Disarm Autobrake
+        - 1: Set Autobrake to LOW
+        - 2: Set Autobrake to MED
+        - 3: Set Autobrake to MAX (if allowed)
+
+- A32NX_AUTOBRAKES_ACTIVE
+    - Bool
+    - Autobrakes are braking
+
 - A32NX_AUTOBRAKES_DECEL_LIGHT
     - Bool
     - Autobrakes are braking and reached the deceleration target
@@ -970,13 +1018,13 @@
       Value | Meaning
       --- | ---
       PREFLIGHT | 0
-      TAKEOFF   | 1
-      CLIMB     | 2
-      CRUISE    | 3
-      DESCENT   | 4
-      APPROACH  | 5
-      GOAROUND  | 6
-      DONE      | 7
+      TAKEOFF | 1
+      CLIMB | 2
+      CRUISE | 3
+      DESCENT | 4
+      APPROACH | 5
+      GOAROUND | 6
+      DONE | 7
 
 - A32NX_FLAPS_HANDLE_INDEX
     - Number
@@ -1013,26 +1061,6 @@
     - Percent
     - Indicates the angle of the right slats out of 27 degrees
 
-- A32NX_LEFT_FLAPS_TARGET_ANGLE
-    - Degrees
-    - Indicates the target angle of the left flaps
-      according to the configuration.
-
-- A32NX_RIGHT_FLAPS_TARGET_ANGLE
-    - Degrees
-    - Indicates the target angle of the right flaps
-      according to the configuration.
-
-- A32NX_LEFT_SLATS_TARGET_ANGLE
-    - Degrees
-    - Indicates the target angle of the left slats
-      according to the configuration.
-
-- A32NX_RIGHT_SLATS_TARGET_ANGLE
-    - Degrees
-    - Indicates the target angle of the right slats
-      according to the configuration.
-
 - A32NX_LEFT_FLAPS_ANGLE
     - Degrees
     - The actual angle of the left flaps
@@ -1061,7 +1089,7 @@
     - Number
     - Indicates the desired flap configuration index according to the table
     - Value | Meaning
-      --- | ---
+            --- | ---
       0 | Conf0
       1 | Conf1
       2 | Conf1F
@@ -1100,6 +1128,64 @@
       --- | ---
       0 | inactive
       1 | active
+
+- A32NX_CHRONO_ELAPSED_TIME
+    - Number
+    - Clock instrument CHR display time elapsed
+      Value | Meaning
+      --- | ---
+      0 or greater | Seconds elapsed
+      -1 | Empty value
+
+- A32NX_CHRONO_ET_ELAPSED_TIME
+    - Number
+    - Clock instrument ET display time elapsed
+      Value | Meaning
+      --- | ---
+      0 or greater | Seconds elapsed
+      -1 | Empty value
+
+- A32NX_LOAD_LIGHTING_PRESET
+    - Number
+    - ID for preset
+    - When set to >0 the corresponding preset will be loaded if defined
+    - Will be reset to 0 after loading is done
+
+- A32NX_SAVE_LIGHTING_PRESET
+    - Number
+    - ID for preset
+    - When set to >0 the corresponding preset will be overwritten and saved to an ini file
+    - Will be reset to 0 after saving is done
+
+- A32NX_LOAD_AIRCRAFT_PRESET
+    - Number
+    - ID for preset (1..5)
+    - When set to >0 the corresponding preset will be loaded if defined
+    - Will be reset to 0 after loading is done
+    - When set to 0 during loading will stop and cancel the loading process
+    - | Value | Meaning            |
+            |-------|--------------------|
+      | 1     | Cold & Dark        |
+      | 2     | Turnaround         |
+      | 3     | Ready for Pushback |
+      | 4     | Ready for Taxi     |
+      | 5     | Ready for Takeoff  |
+
+- A32NX_LOAD_AIRCRAFT_PRESET_PROGRESS
+    - Number (0.0..1.0)
+    - While loading a preset this will contain the percentage of the total progress of loading
+
+- A32NX_PUSHBACK_SYSTEM_ENABLED
+    - Bool
+    - Read/Write
+    - 0 when pushback system is completely disabled, 1 when system is enabled
+    - When disabled pushback UI in the flyPadOS 3 is disabled and movement updates are suspended.
+    - This prevents conflicts with other pushback add-ons
+
+- A32NX_DEVELOPER_STATE
+    - Bool
+    - Persistent
+    - Enables developer-specific options like direct payload adjustments
 
 ## EIS Display System
 
@@ -1164,16 +1250,16 @@
     - Provides a bitfield of the active FM messages to the NDs
       Bit | Meaning
       --- | ---
-      0  | SelectTrueRef
-      1  | CheckNorthRef
-      2  | NavAccuracyDowngrade
-      3  | NavAccuracyUpgradeNoGps
-      4  | SpecifiedVorDmeUnavailble
-      5  | NavAccuracyUpgradeGps
-      6  | GpsPrimary
-      7  | MapPartlyDisplayed
-      8  | SetOffsideRangeMode
-      9  | OffsideFmControl
+      0 | SelectTrueRef
+      1 | CheckNorthRef
+      2 | NavAccuracyDowngrade
+      3 | NavAccuracyUpgradeNoGps
+      4 | SpecifiedVorDmeUnavailble
+      5 | NavAccuracyUpgradeGps
+      6 | GpsPrimary
+      7 | MapPartlyDisplayed
+      8 | SetOffsideRangeMode
+      9 | OffsideFmControl
       10 | OffsideFmWxrControl
       11 | OffsideWxrControl
       12 | GpsPrimaryLost
@@ -1183,33 +1269,58 @@
         - L
         - R
 
+- A32NX_EFIS_{side}_TO_WPT_BEARING
+    - Degrees
+    - Provides the bearing to the active leg termination
+    - {side}
+        - L
+        - R
+
+- A32NX_EFIS_{side}_TO_WPT_DISTANCE
+    - Nautical miles & > 0
+    - Provides the straight distance to the active leg termination
+    - {side}
+        - L
+        - R
+
+- A32NX_EFIS_{side}_TO_WPT_ETA
+    - Seconds
+    - Provides the number of seconds to the active leg termination (to be converted to UTC by DMC)
+    - {side}
+        - L
+        - R
+
+- A32NX_PFD_MSG_SET_HOLD_SPEED
+    - Bool
+    - Indicates if the SET HOLD SPEED message is shown on the PFD
+
 - A32NX_ISIS_LS_ACTIVE
-	- Bool
-	- Indicates whether LS scales are shown on the ISIS
-	- Toggled by `H:A32NX_ISIS_LS_PRESSED`
+    - Bool
+    - Indicates whether LS scales are shown on the ISIS
+    - Toggled by `H:A32NX_ISIS_LS_PRESSED`
 
 - A32NX_ISIS_BUGS_ACTIVE
-	- Bool
-	- Indicates whether bugs page is shown on the ISIS
-	- Toggled by `H:A32NX_ISIS_BUGS_PRESSED`
+    - Bool
+    - Indicates whether bugs page is shown on the ISIS
+    - Toggled by `H:A32NX_ISIS_BUGS_PRESSED`
 
 - A32NX_ISIS_BUGS_ALT_VALUE:{number}
-	- Number (feet)
-	- Altitude of altitude bug set on ISIS bugs page
+    - Number (feet)
+    - Altitude of altitude bug set on ISIS bugs page
     - {number}
         - 0
         - 1
 
 - A32NX_ISIS_BUGS_ALT_ACTIVE:{number}
-	- Bool
-	- Indicates whether altitude bug is shown on the altitude tape of the ISIS
+    - Bool
+    - Indicates whether altitude bug is shown on the altitude tape of the ISIS
     - {number}
         - 0
         - 1
 
 - A32NX_ISIS_BUGS_SPD_VALUE:{number}
-	- Number (knots)
-	- Speed of speed bug set on ISIS bugs page
+    - Number (knots)
+    - Speed of speed bug set on ISIS bugs page
     - {number}
         - 0
         - 1
@@ -1217,8 +1328,8 @@
         - 3
 
 - A32NX_ISIS_BUGS_SPD_ACTIVE:{number}
-	- Bool
-	- Indicates whether speed bug is shown on the speed tape of the ISIS
+    - Bool
+    - Indicates whether speed bug is shown on the speed tape of the ISIS
     - {number}
         - 0
         - 1
@@ -1269,6 +1380,14 @@
 
 ## Fly-By-Wire System
 
+- A32NX_DEV_DIRECT_LAW
+    - Bool
+    - Development only: set to 1 to force full direct law FBW
+
+- A32NX_FLIGHT_CONTROLS_TRACKING_MODE
+    - Bool
+    - Indicates if tracking mode is active: flight controls are coming from external source (ie: YourControls)
+
 - A32NX_LOGGING_FLIGHT_CONTROLS_ENABLED
     - Bool
     - Indicates if logging of flight control events is enabled
@@ -1318,22 +1437,89 @@
     - Degrees
     - Target beta (sideslip) in case of asymmetric thrust
 
-- A32NX_3D_AILERON_LEFT_DEFLECTION
+- A32NX_AILERON_LEFT_DEFLECTION_DEMAND
     - Number
-    - Provides the left aileron position
+    - Provides the left aileron position demand to hydraulics
       Value | Meaning
       --- | ---
       -1.0 | full up
-       0.0 | neutral
+      0.0 | neutral
       1.0 | full down
 
-- A32NX_3D_AILERON_RIGHT_DEFLECTION
+- A32NX_AILERON_RIGHT_DEFLECTION_DEMAND
     - Number
-    - Provides the right aileron position
+    - Provides the right aileron position demand to hydraulics
       Value | Meaning
       --- | ---
       -1.0 | full down
-       0.0 | neutral
+      0.0 | neutral
+      1.0 | full up
+
+- A32NX_HYD_AILERON_LEFT_DEFLECTION
+    - Number
+    - Provides the final left aileron physical position
+      Value | Meaning
+      --- | ---
+      -1.0 | full up
+      0.0 | neutral
+      1.0 | full down
+
+- A32NX_HYD_AILERON_RIGHT_DEFLECTION
+    - Number
+    - Provides the final right aileron physical position
+      Value | Meaning
+      --- | ---
+      -1.0 | full down
+      0.0 | neutral
+      1.0 | full up
+
+- A32NX_THS_{number}_ACTIVE_MODE_COMMANDED
+    - Boolean
+    - Trim electric motor {number} is commanded active
+    - {number}
+        - 1
+        - 2
+        - 3
+
+- A32NX_THS_{number}_COMMANDED_POSITION
+    - Degree
+    - Trim electric motor {number} position demand in trim surface deflection angle
+
+- A32NX_HYD_THS_TRIM_MANUAL_OVERRIDE
+    - Boolean
+    - Feedback signal from the trim actuator system. True if pilot is moving or holding trim wheel
+
+- A32NX_HYD_TRIM_WHEEL_PERCENT
+    - Percent
+    - Trim wheel position in percent
+
+- A32NX_ELEVATOR_DEFLECTION_DEMAND
+    - Number
+    - Provides the elevator position demand to hydraulics
+      Value | Meaning
+      --- | ---
+      -1.0 | full down
+      0.0 | neutral
+      1.0 | full up
+
+- A32NX_RUDDER_DEFLECTION_DEMAND
+    - Number
+    - Provides the rudder position demand to hydraulics
+      Value | Meaning
+      --- | ---
+      -1.0 | full left
+      0.0 | neutral
+      1.0 | full right
+
+- A32NX_SPOILERS_{side}_DEFLECTION_DEMAND
+    - Number
+    - {side}
+        - LEFT
+        - RIGHT
+    - Provides the spoiler position demand to hydraulics
+      Value | Meaning
+      --- | ---
+      0.0 | neutral
       1.0 | full up
 
 ## ADIRS
@@ -1425,17 +1611,18 @@ In the variables below, {number} should be replaced with one item in the set: { 
 - A32NX_ADIRS_ADR_{number}_STATIC_AIR_TEMPERATURE
     - Arinc429Word<Celsius>
     - The static air temperature (SAT).
-      {number}: 1 or 3
 
 - A32NX_ADIRS_ADR_{number}_TOTAL_AIR_TEMPERATURE
     - Arinc429Word<Celsius>
     - The total air temperature (TAT).
-      {number}: 1 or 3
 
 - A32NX_ADIRS_ADR_{number}_INTERNATIONAL_STANDARD_ATMOSPHERE_DELTA
     - Arinc429Word<Celsius>
     - The delta (deviation) from international standard atmosphere temperature.
-      {number}: 1 or 3
+
+- A32NX_ADIRS_ADR_{number}_ANGLE_OF_ATTACK
+    - Arinc429Word<Degrees>
+    - The angle of attack (α) of the aircraft
 
 - A32NX_ADIRS_IR_{number}_PITCH
     - Arinc429Word<Degrees>
@@ -1449,9 +1636,17 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Arinc429Word<Degrees>
     - The inertial heading of the aircraft.
 
+- A32NX_ADIRS_IR_{number}_TRUE_HEADING
+    - Arinc429Word<Degrees>
+    - The true inertial heading of the aircraft.
+
 - A32NX_ADIRS_IR_{number}_TRACK
     - Arinc429Word<Degrees>
     - The inertial track of the aircraft.
+
+- A32NX_ADIRS_IR_{number}_TRUE_TRACK
+    - Arinc429Word<Degrees>
+    - The true inertial track of the aircraft.
 
 - A32NX_ADIRS_IR_{number}_VERTICAL_SPEED
     - Arinc429Word<Feet per minute>
@@ -1477,16 +1672,103 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Arinc429Word<Degrees>
     - The longitude of the aircraft.
 
+- A32NX_ADIRS_IR_{number}_DRIFT_ANGLE
+    - Arinc429Word<Degrees>
+    - The drift angle of the aircraft (drift angle = heading - track)
+
+- A32NX_ADIRS_IR_{number}_FLIGHT_PATH_ANGLE
+    - Arinc429Word<Degrees>
+    - The kinematic flight path angle (γ) (arctan(VS / GS))
+
+- A32NX_ADIRS_IR_{number}_BODY_PITCH_RATE
+    - Arinc429Word<Degrees per second>
+    - The body pitch rate (q) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_BODY_ROLL_RATE
+    - Arinc429Word<Degrees per second>
+    - The body roll rate (p) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_BODY_YAW_RATE
+    - Arinc429Word<Degrees per second>
+    - The body yaw rate (r) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_BODY_LONGITUDINAL_ACC
+    - Arinc429Word<g-Number>
+    - The longitudinal (forward/backward) acceleration of the aircraft
+
+- A32NX_ADIRS_IR_{number}_BODY_LATERAL_ACC
+    - Arinc429Word<g-Number>
+    - The lateral (left/right) acceleration of the aircraft
+
+- A32NX_ADIRS_IR_{number}_BODY_NORMAL_ACC
+    - Arinc429Word<g-Number>
+    - The normal acceleration (load factor) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_HEADING_RATE
+    - Arinc429Word<Degrees per second>
+    - The heading rate (ψ^dot) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_PITCH_ATT_RATE
+    - Arinc429Word<Degrees per second>
+    - The pitch rate (θ^dot) of the aircraft
+
+- A32NX_ADIRS_IR_{number}_ROLL_ATT_RATE
+    - Arinc429Word<Degrees per second>
+    - The roll rate (φ^dot) of the aircraft
+
 - A32NX_ADIRS_USES_GPS_AS_PRIMARY
     - Bool
     - Whether or not the GPS is used as the primary means of navigation/position determination.
 
+## Radio Receivers
+
+- A32NX_RADIO_RECEIVER_USAGE_ENABLED
+    - Bool
+    - Whether or not the calculated ILS signals shall be used
+
+- A32NX_RADIO_RECEIVER_LOC_IS_VALID
+    - Bool
+    - Indicates if the localizer signal is valid
+
+- A32NX_RADIO_RECEIVER_LOC_DISTANCE
+    - Number in nautical miles
+    - Indicates the distance from the localizer
+
+- A32NX_RADIO_RECEIVER_LOC_DEVIATION
+    - Number in degrees
+    - If A32NX_RADIO_RECEIVER_USAGE_ENABLED == 0 it contains the deviation from the sim
+    - If A32NX_RADIO_RECEIVER_USAGE_ENABLED == 1 it contains calculated LOC deviation
+
+- A32NX_RADIO_RECEIVER_GS_IS_VALID
+    - Bool
+    - Indicates if the glide slope signal is valid
+
+- A32NX_RADIO_RECEIVER_GS_DEVIATION
+    - Number in degrees
+    - Deviation from glide slope
+    - If A32NX_RADIO_RECEIVER_USAGE_ENABLED == 0 it contains the deviation from the sim
+    - If A32NX_RADIO_RECEIVER_USAGE_ENABLED == 1 it contains calculated LOC deviation
+
 ## Flight Management System
 
 - A32NX_FM_ENABLE_APPROACH_PHASE
-  - Bool
-  - Indicates whether the FMS should switch to APPROACH phase.
-  - **WARNING:** This is temporary and internal. Do not use.
+    - Bool
+    - Indicates whether the FMS should switch to APPROACH phase.
+    - **WARNING:** This is temporary and internal. Do not use.
+
+- A32NX_FMGC_{side}_LDEV_REQUEST
+    - Bool
+    - Indicates whether the FMGC is requesting L/DEV to be displayed on the PFD
+    - {side}
+        - L
+        - R
+
+- A32NX_FMGC_L_RNP
+    - Number (nautical miles)
+    - The active Required Navigation Performance
+    - {side}
+        - L
+        - R
 
 ## Autopilot System
 
@@ -1540,6 +1822,7 @@ In the variables below, {number} should be replaced with one item in the set: { 
       ROLL_OUT | 34
       SRS | 40
       SRS_GA | 41
+      TCAS | 50
 
 - A32NX_FMA_VERTICAL_ARMED
     - Bitmask
@@ -1552,6 +1835,7 @@ In the variables below, {number} should be replaced with one item in the set: { 
       DES | 3
       GS | 4
       FINAL | 5
+      TCAS | 6
 
 - A32NX_FMA_EXPEDITE_MODE
     - Boolean
@@ -1677,50 +1961,55 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Indicates the selected heading on the FCU, instantly updated
     - In case of managed heading mode, the value is -1
 
+- A32NX_AUTOPILOT_H_DOT_RADIO
+    - Number (Feet per minute)
+    - Indicates the current estimated vertical speed relative to the runway
+    - Important: the signal is only usable above the runway and is not to be used elsewhere
+
 - A32NX_FCU_SPD_MANAGED_DASHES
-  - Boolean
-  - Indicates if managed speed/mach mode is active and a numerical value is not displayed
-    State | Value
+    - Boolean
+    - Indicates if managed speed/mach mode is active and a numerical value is not displayed
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED | 1
 
 - A32NX_FCU_SPD_MANAGED_DOT
-  - Boolean
-  - Indicates if managed speed/mach mode is active
-    State | Value
+    - Boolean
+    - Indicates if managed speed/mach mode is active
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED | 1
 
 - A32NX_FCU_HDG_MANAGED_DASHES
-  - Boolean
-  - Indicates if managed heading mode is active and a numerical value is not displayed
-    State | Value
+    - Boolean
+    - Indicates if managed heading mode is active and a numerical value is not displayed
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED | 1
 
 - A32NX_FCU_HDG_MANAGED_DOT
-  - Boolean
-  - Indicates if managed heading mode is active or armed
-    State | Value
+    - Boolean
+    - Indicates if managed heading mode is active or armed
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED/ARMED | 1
 
 - A32NX_FCU_ALT_MANAGED
-  - Boolean
-  - Indicates if managed altitude mode is active (dot)
-    State | Value
+    - Boolean
+    - Indicates if managed altitude mode is active (dot)
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED | 1
 
 - A32NX_FCU_VS_MANAGED
-  - Boolean
-  - Indicates if managed VS/FPA mode is active
-    State | Value
+    - Boolean
+    - Indicates if managed VS/FPA mode is active
+      State | Value
       --- | ---
       SELECTED | 0
       MANAGED | 1
@@ -1778,15 +2067,20 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Number
     - Used as data transport for event `H:A320_Neo_FCU_VS_SET`
 
+- A32NX_FG_PHI_LIMIT
+    - Number in Degrees
+    - Indicates the current bank limit requested by the FM
+    - Always positive
+
 - A32NX_FG_CROSS_TRACK_ERROR
     - Number in nm
     - Used for laternal guidance in mode NAV
-    - Error from desired path
+    - Error from desired path, -ve to the right of track
 
 - A32NX_FG_TRACK_ANGLE_ERROR
     - Number in degrees
     - Used for laternal guidance in mode NAV
-    - Error from desired heading or track
+    - Error from desired heading or track, -ve when clockwise of desired track
 
 - A32NX_FG_PHI_COMMAND
     - Number in degrees
@@ -1831,9 +2125,9 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Boolean
     - Indicates if the FINAL vertical mode can engage
     - FINAL mode will engage if :
-      - This Simvar is true
-      - NAV mode is engaged
-      - FINAL mode is armed
+        - This Simvar is true
+        - NAV mode is engaged
+        - FINAL mode is armed
 
 ## Autothrust System
 
@@ -2011,6 +2305,14 @@ In the variables below, {number} should be replaced with one item in the set: { 
     - Indicates the low or high value to latch into the given detent
     - Range is from -1 to 1
 
+- A32NX_THROTTLE_MAPPING_INCREMENT_NORMAL
+    - Number
+    - Indicates the increment being used for normal key events
+
+- A32NX_THROTTLE_MAPPING_INCREMENT_SMALL
+    - Number
+    - Indicates the increment being used for small key events
+
 ## Engine and FADEC System
 
 - A32NX_ENGINE_CYCLE_TIME
@@ -2046,11 +2348,13 @@ In the variables below, {number} should be replaced with one item in the set: { 
 
 - A32NX_ENGINE_N1:{index}
     - Number (% N1)
-    - Custom engine {index} N1 to model realistic start-up & shutdown, although equal to Sim's N2 for other flight phases.
+    - Custom engine {index} N1 to model realistic start-up & shutdown, although equal to Sim's N2 for other flight
+      phases.
 
 - A32NX_ENGINE_N2:{index}
     - Number (% N2)
-    - Custom engine N2 {index} to model realistic start-up & shutdown, although equal to Sim's N2 for other flight phases.
+    - Custom engine N2 {index} to model realistic start-up & shutdown, although equal to Sim's N2 for other flight
+      phases.
 
 - A32NX_ENGINE_EGT:{index}
     - Number (degrees Celsius)
@@ -2114,6 +2418,47 @@ In the variables below, {number} should be replaced with one item in the set: { 
 
 ## Air Conditioning / Pressurisation / Ventilation
 
+- A32NX_COND_{id}_TEMP
+    - Degree Celsius
+    - Temperature as measured in each of the cabin zones and cockpit
+    - {id}
+        - CKPT
+        - FWD
+        - AFT
+
+- A32NX_COND_{id}_DUCT_TEMP
+    - Degree Celsius
+    - Temperature of trim air coming out of the ducts in the cabin and cockpit
+    - {id}
+        - CKPT
+        - FWD
+        - AFT
+
+- A32NX_COND_PACK_FLOW_VALVE_{index}_IS_OPEN
+    - Bool
+    - True if the respective {1 or 2} pack flow valve is open
+
+- A32NX_COND_PACK_FLOW
+    - Percent
+    - Percentage flow coming out of the packs into the cabin (LO: 80%, NORM: 100%, HI: 120%)
+
+- A32NX_OVHD_COND_{id}_SELECTOR_KNOB
+    - Percentage
+    - Percent rotation of the overhead temperature selectors for each of the cabin zones
+    - To transform the value into degree celsius use this formula: this * 0.04 + 18
+    - {id}
+        - CKPT
+        - FWD
+        - AFT
+
+- A32NX_OVHD_COND_PACK_{index}_PB_IS_ON
+    - Bool
+    - True if pack {1 or 2} pushbutton is pressed in the on position (no white light)
+
+- A32NX_OVHD_COND_PACK_{index}_PB_HAS_FAULT
+    - Bool
+    - True if pack {1 or 2} has a fault
+
 - A32NX_PRESS_CABIN_ALTITUDE
     - Feet
     - The equivalent altitude from sea level of the interior of the cabin based on the internal pressure
@@ -2121,7 +2466,7 @@ In the variables below, {number} should be replaced with one item in the set: { 
 - A32NX_PRESS_CABIN_DELTA_PRESSURE
     - PSI
     - The difference in pressure between the cabin interior and the exterior air.
-    Positive when cabin pressure is higher than external pressure.
+      Positive when cabin pressure is higher than external pressure.
 
 - A32NX_PRESS_CABIN_VS
     - Feet per minute
@@ -2302,7 +2647,7 @@ In the variables below, {number} should be replaced with one item in the set: { 
 
 - A32NX_PNEU_PACK_{number}_FLOW_VALVE_FLOW_RATE:
     - Indicates the flow rate through the pack flow valve
-    - Gallon per second
+    - Kilogram per second
     - {number}
         - 1
         - 2
@@ -2318,3 +2663,283 @@ In the variables below, {number} should be replaced with one item in the set: { 
 - A32NX_OVHD_PNEU_ENG_{number}_BLEED_PB_HAS_FAULT:
     - Indicates whether the fault light is on for the engine bleed push button
     - Bool
+
+## Flaps / Slats (ATA 27)
+
+- A32NX_SFCC_SLAT_FLAP_SYSTEM_STATUS_WORD
+    - Slat/Flap system status discrete word of the SFCC bus output
+    - Arinc429<Discrete>
+    - Note that multiple SFCC are not yet implemented, thus no {number} in the name.
+    - | Bit |            Description            |
+      |:---:|:---------------------------------:|
+      | 11  | Slat Fault                        |
+      | 12  | Flap Fault                        |
+      | 13  | Slat Jam                          |
+      | 14  | Flap Jam                          |
+      | 15  | Slat WTB engaged                  |
+      | 16  | Flap WTB engaged                  |
+      | 17  | Lever in Config 0                 |
+      | 18  | Lever in Config 1                 |
+      | 19  | Lever in Config 2                 |
+      | 20  | Lever in Config 3                 |
+      | 21  | Lever in Config FULL              |
+      | 22  | Slat Relief Engaged               |
+      | 23  | Flap Attachement Failure          |
+      | 24  | Slat Alpha lock Engaged           |
+      | 25  | Slat Baulk Engaged                |
+      | 26  | Flap Auto-retract Engaged         |
+      | 27  | CSU out of detent longer than 10s |
+      | 28  | Slat Data Valid                   |
+      | 29  | Flap Data Valid                   |
+
+- A32NX_SFCC_SLAT_FLAP_ACTUAL_POSITION_WORD
+    - Slat/Flap actual position discrete word of the SFCC bus output
+    - Arinc429<Discrete>
+    - Note that multiple SFCC are not yet implemented, thus no {number} in the name.
+    - | Bit |                Description               |
+      |:---:|:----------------------------------------:|
+      | 11  | Slat Data Valid                          |
+      | 12  | Slats Retracted 0° (6.2° > FPPU > -5°)   |
+      | 13  | Slats >= 17° (337° > FPPU > 210.4°)      |
+      | 14  | Slats >= 26° (337° > FPPU > 321.8)       |
+      | 15  | Slats Extended 27° (337° > FPPU > 327.4) |
+      | 16  | Slat WTB Engaged                         |
+      | 17  | Slat Fault                               |
+      | 18  | Flap Data Valid                          |
+      | 19  | Flaps Retracted 0° (2.5° > FPPU > -5°)   |
+      | 20  | Flaps >= 14° (254° > FPPU > 140.7)       |
+      | 21  | Flaps >= 19° (254° > FPPU > 163.7°)      |
+      | 22  | Flaps >= 39° (254° > FPPU > 247.8°)      |
+      | 23  | Flaps Extended 40° (254° > FPPU > 250°)  |
+      | 24  | Flap WTB engaged                         |
+      | 25  | Flap Fault                               |
+      | 26  | Spoiler Lift Demand                      |
+      | 27  | Spoiler Limit Demand                     |
+      | 28  | Slat System Jam                          |
+      | 29  | Flap System Jam                          |
+
+- A32NX_SFCC_SLAT_ACTUAL_POSITION_WORD
+    - Slat actual position word of the SFCC bus output
+    - Arinc429<Degrees>
+    - Note that multiple SFCC are not yet implemented, thus no {number} in the name.
+    - The Slat FPPU angle ranges from 0° to 360°
+
+- A32NX_SFCC_FLAP_ACTUAL_POSITION_WORD
+    - Flap actual position word of the SFCC bus output
+    - Arinc429<Degrees>
+    - Note that multiple SFCC are not yet implemented, thus no {number} in the name.
+    - The Flap FPPU angle ranges from 0° to 360°
+
+## Landing Gear (ATA 32)
+
+- A32NX_LGCIU_{number}_DISCRETE_WORD_1
+    - Discrete Data word 1 of the LGCIU bus output
+    - Arinc429<Discrete>
+    - {number}
+        - 1
+        - 2
+    - | Bit |                                  Description                                 |
+      |:---:|:----------------------------------------------------------------------------:|
+      | 11  | LH gear not locked up and not selected down                                  |
+      | 12  | RH gear not locked up and not selected down                                  |
+      | 13  | Nose gear not locked up and not selected down                                |
+      | 14  | LH gear not locked down and selected down                                    |
+      | 15  | RH gear not locked down and selected down                                    |
+      | 16  | Nose gear not locked down and selected down                                  |
+      | 17  | LH gear door not uplocked                                                    |
+      | 18  | RH gear door not uplocked                                                    |
+      | 19  | Nose gear door not uplocked                                                  |
+      | 20  | LH gear uplock locked and gear locked down                                   |
+      | 21  | RH gear uplock locked and gear locked down                                   |
+      | 22  | Nose gear uplock locked and gear locked down                                 |
+      | 23  | LH gear downlocked                                                           |
+      | 24  | RH gear downlocked                                                           |
+      | 25  | Nose gear downlocked                                                         |
+      | 26  | LH gear shock absorber not extended (Treat GND PWR connected as on ground)   |
+      | 27  | RH gear shock absorber not extended (Treat GND PWR connected as on ground)   |
+      | 28  | Nose gear shock absorber not extended (Treat GND PWR connected as on ground) |
+      | 29  | Gear selected down (Lever Position)                                          |
+
+- A32NX_LGCIU_{number}_DISCRETE_WORD_2
+    - Discrete Data word 2 of the LGCIU bus output
+    - Arinc429<Discrete>
+    - {number}
+        - 1
+        - 2
+    - | Bit |                                     Description                                     |
+      |:---:|:-----------------------------------------------------------------------------------:|
+      | 11  | LH & RH gear shock absorber compressed (Don't treat GND PWR connected as on ground) |
+      | 12  | LH gear shock absorber compressed (Don't treat GND PWR connected as on ground)      |
+      | 13  | RH gear shock absorber compressed (Don't treat GND PWR connected as on ground)      |
+      | 14  | Nose gear shock absorber compressed (Don't treat GND PWR connected as on ground)    |
+      | 15  | LH & RH gear downlocked                                                             |
+
+
+- A32NX_LGCIU_{number}_DISCRETE_WORD_3
+    - Discrete Data word 3 of the LGCIU bus output
+    - Arinc429<Discrete>
+    - {number}
+        - 1
+        - 2
+    - | Bit |            Description            |
+      |:---:|:---------------------------------:|
+      | 11  | LH gear not locked up             |
+      | 12  | RH gear not locked up             |
+      | 13  | Nose gear not locked up           |
+      | 14  | Gear selected up (Lever Position) |
+      | 25  | LH gear door fully open           |
+      | 26  | RH gear door fully open           |
+      | 27  | LH Nose gear door fully open      |
+      | 28  | RH Nose gear door fully open      |
+
+- A32NX_LGCIU_{number}_{gear}_GEAR_COMPRESSED
+    - Indicates if the shock absorber is compressed (not fully extended)
+    - Bool
+    - {number}
+        - 1
+        - 2
+    - {gear}
+        - NOSE
+        - LEFT
+        - RIGHT
+
+- A32NX_LGCIU_{number}_{gear}_GEAR_DOWNLOCKED
+    - True if the gear is locked down.
+    - Boolean
+    - {number}
+        - 1
+        - 2
+    - {gear}
+        - NOSE
+        - LEFT
+        - RIGHT
+
+- A32NX_LGCIU_{number}_{gear}_GEAR_UNLOCKED
+    - True is the gear is not in the same state as the gear lever
+    - Boolean
+    - {number}
+        - 1
+        - 2
+    - {gear}
+        - NOSE
+        - LEFT
+        - RIGHT
+
+- A32NX_GEAR_DOOR_{gear}_POSITION
+    - Indicates the gear door position. 1 is fully opened. 0 fully closed and locked.
+    - Percent over 100
+    - {gear}
+        - CENTER
+        - LEFT
+        - RIGHT
+
+- A32NX_GEAR_{gear}_POSITION
+    - Indicates the gear position. 1 is fully opened. 0 fully closed and locked.
+    - Percent over 100
+    - {gear}
+        - CENTER
+        - LEFT
+        - RIGHT
+
+- A32NX_GRAVITYGEAR_ROTATE_PCT
+    - Indicates the position of the gear emergency extension crank handle from 0 to 300 (3 turns)
+    - Percent
+
+## ATC (ATA 34)
+
+- A32NX_TRANSPONDER_MODE
+    - The transponder mode selector switch position
+    - Enum
+      Mode | Value
+      --- | ---
+      STBY | 0
+      AUTO | 1
+      ON | 2
+
+- A32NX_TRANSPONDER_SYSTEM
+    - The transponder system selector switch position
+    - Enum
+      System | Value
+      --- | ---
+      Transponder 1 | 0
+      Transponder 2 | 1
+
+- A32NX_SWITCH_ATC_ALT
+    - The transponder altitude reporting switch position
+    - Bool
+
+- A32NX_SWITCH_TCAS_Position
+    - Enum
+    - Read-Only
+    - Selected TCAS Mode
+      Description | Value
+      --- | ---
+      STBY | 0
+      TA | 1
+      TA/RA | 2
+
+- A32NX_SWITCH_TCAS_Traffic_Position
+    - Enum
+    - Read-Only
+    - Selected TCAS Display Mode
+      Description | Value
+      --- | ---
+      THREAT | 0
+      ALL | 1
+      ABV | 2
+      BELOW | 3
+
+- A32NX_TCAS_MODE
+    - Enum
+    - Read-Only
+    - Whether TCAS has been set to standby, TA Only or TA/RA Mode (see ATC panel)
+      Description | Value
+      --- | ---
+      STBY | 0
+      TA | 1
+      TA/RA | 2
+
+- A32NX_TCAS_SENSITIVITY
+    - Number
+    - Read-Only
+    - Current sensitivity level
+
+- A32NX_TCAS_STATE
+    - Enum
+    - Read-Only
+    - Currently active traffic/resolution advisory state
+      Description | Value
+      --- | ---
+      NONE | 0
+      TA | 1
+      RA | 2
+
+- A32NX_TCAS_RA_CORRECTIVE
+    - boolean
+    - Read-Only
+    - Active RA is corrective?
+
+- A32NX_TCAS_VSPEED_RED:{number}
+    - Feet per minute
+    - Read-Only
+    - Lower and upper red vertical speed range of current active RA
+    - {number}
+        - 0
+        - 1
+
+- A32NX_TCAS_VSPEED_GREEN:{number}
+    - Feet per minute
+    - Read-Only
+    - Lower and upper green vertical speed range of current active RA
+    - {number}
+        - 0
+        - 1
+
+## Radio Altimeter (ATA 34)
+
+- A32NX_RA_{number}_RADIO_ALTITUDE
+    - `Arinc429Word<Feet>`
+    - The height over ground as measured by the corresponding radio altimeter towards the aft of the aircraft
+    - {number}
+        - 0
+        - 1

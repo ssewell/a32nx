@@ -39,11 +39,17 @@ pub(super) fn nose_wheel_steering(builder: &mut MsfsAspectBuilder) -> Result<(),
     // The tiller handle should start in a centered position.
     builder.init_variable(Variable::aspect("RAW_TILLER_HANDLE_POSITION"), 0.5);
 
-    // Lacking a better event to bind to, we've picked a mixture axis for setting the
-    // tiller handle position.
+    // This axis is kept for legacy reasons and was used before the steering axis was available
     builder.event_to_variable(
         "AXIS_MIXTURE4_SET",
         EventToVariableMapping::EventData32kPosition,
+        Variable::aspect("RAW_TILLER_HANDLE_POSITION"),
+        |options| options.mask(),
+    )?;
+
+    builder.event_to_variable(
+        "AXIS_STEERING_SET",
+        EventToVariableMapping::EventData32kPositionInverted,
         Variable::aspect("RAW_TILLER_HANDLE_POSITION"),
         |options| options.mask(),
     )?;
@@ -98,12 +104,10 @@ pub(super) fn nose_wheel_steering(builder: &mut MsfsAspectBuilder) -> Result<(),
             if realistic_tiller_enabled {
                 // Convert tiller handle position to [-1;1], -1 is left
                 tiller_handle_position * 2. - 1.
+            } else if !tiller_pedal_disconnect {
+                rudder_pedal_position
             } else {
-                if !tiller_pedal_disconnect {
-                    rudder_pedal_position
-                } else {
-                    0.
-                }
+                0.
             }
         },
         Variable::named("TILLER_HANDLE_POSITION"),

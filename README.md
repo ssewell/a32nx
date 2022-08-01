@@ -1,4 +1,5 @@
-<img src="https://raw.githubusercontent.com/flybywiresim/fbw-branding/master/svg/FBW-Logo.svg" placeholder="FlyByWire" width="400"/>
+![FlyByWire Simulations](https://raw.githubusercontent.com/flybywiresim/branding/1391fc003d8b5d439d01ad86e2778ae0bfc8b682/tails-with-text/FBW-Color-Light.svg#gh-dark-mode-only)
+![FlyByWire Simulations](https://github.com/flybywiresim/branding/blob/master/tails-with-text/FBW-Color-Dark.svg#gh-light-mode-only)
 
 # FlyByWire Simulations A32NX
 
@@ -14,7 +15,7 @@
 
 The A32NX Project is a community-driven open source project to create a free Airbus A320neo in Microsoft Flight Simulator that is as close to reality as possible.
 
-The following aircraft configuration is currently simulated:
+The following aircraft configuration is currently simulated or targeted:
 
 ### A320neo
 
@@ -22,8 +23,14 @@ The following aircraft configuration is currently simulated:
  Model       A320-251N
  Engine      CFM LEAP 1A-26
  APU         APS3200
- FMGS        Honeywell Release H3
+ FMS         Honeywell Release H3
  FWC Std.    H2F9C
+ RA          Honeywell ALA-52B
+ TAWS        Honeywell EGPWS
+ ACAS        Honeywell TPA-100B
+ ATC         Honeywell TRA-100B
+ MMR         Honeywell iMMR
+ WXR         Honeywell RDR-4000
  ```
 
 Please note that this configuration may change in the future as the A32NX project evolves and changes.
@@ -74,7 +81,7 @@ Chances are, yes! While we do not guarantee every single detail of the aircraft 
 
 ### Why has feature X not been implemented yet?
 
-It's very likely that the feature you are awaiting is already under development! However, we strive for the greatest accuracy possible when producing aircraft, and it is therefore likely that a great deal of time will be spent on developing a proper software design and gathering sufficient references before we are able to offer the feature. 
+It's very likely that the feature you are awaiting is already under development! However, we strive for the greatest accuracy possible when producing aircraft, and it is therefore likely that a great deal of time will be spent on developing a proper software design and gathering sufficient references before we are able to offer the feature.
 
 ### Why is my version not the same as what I see others using?
 

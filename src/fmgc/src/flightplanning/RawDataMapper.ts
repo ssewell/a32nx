@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import { normaliseApproachName } from '@shared/flightplan';
+
 /**
  * A class for mapping raw facility data to WayPoints.
  */
@@ -35,9 +37,11 @@ export class RawDataMapper {
     public static toWaypoint(facility: any, instrument: BaseInstrument): WayPoint {
         const waypoint = new WayPoint(instrument);
 
-        waypoint.ident = facility.icao.substring(7, 12).trim();
+        waypoint.ident = WayPoint.formatIdentFromIcao(facility.icao);
         waypoint.icao = facility.icao;
         waypoint.type = facility.icao[0];
+
+        let alt = 0;
 
         switch (waypoint.type) {
         case 'A': {
@@ -45,7 +49,10 @@ export class RawDataMapper {
             info.CopyBaseInfosFrom(waypoint);
             info.UpdateNamedFrequencies();
 
+            alt = 3.28084 * facility.runways.reduce((sum, r) => sum + r.elevation, 0) / facility.runways.length;
+
             info.approaches = facility.approaches;
+            info.approaches.forEach((approach) => approach.name = normaliseApproachName(approach.name));
             info.approaches.forEach((approach) => approach.transitions.forEach((trans) => trans.name = trans.legs[0].fixIcao.substring(7, 12).trim()));
             info.approaches.forEach((approach) => approach.runway = approach.runway.trim());
 
@@ -84,7 +91,7 @@ export class RawDataMapper {
             waypoint.infos.routes = facility.routes;
         }
 
-        waypoint.infos.coordinates = new LatLongAlt(facility.lat, facility.lon);
+        waypoint.infos.coordinates = new LatLongAlt(facility.lat, facility.lon, alt);
         waypoint.additionalData = {};
         return waypoint;
     }

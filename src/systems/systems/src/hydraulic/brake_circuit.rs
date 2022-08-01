@@ -159,6 +159,7 @@ impl BrakeCircuit {
         accumulator_volume: Volume,
         accumulator_fluid_volume_at_init: Volume,
         total_displacement: Volume,
+        circuit_target_pressure: Pressure,
     ) -> BrakeCircuit {
         let mut has_accu = true;
         if accumulator_volume <= Volume::new::<gallon>(0.) {
@@ -185,6 +186,7 @@ impl BrakeCircuit {
                 accumulator_volume,
                 accumulator_fluid_volume_at_init,
                 true,
+                circuit_target_pressure,
             ),
             total_volume_to_actuator: Volume::new::<gallon>(0.),
             total_volume_to_reservoir: Volume::new::<gallon>(0.),
@@ -503,27 +505,26 @@ mod tests {
     use std::time::Duration;
     use uom::si::{pressure::psi, volume::gallon};
 
+    #[derive(Default)]
     struct TestHydraulicSection {
-        current_pressure: Pressure,
+        pressure: Pressure,
     }
     impl TestHydraulicSection {
-        fn new(pressure: Pressure) -> Self {
-            Self {
-                current_pressure: pressure,
-            }
-        }
-
         fn set_pressure(&mut self, pressure: Pressure) {
-            self.current_pressure = pressure;
+            self.pressure = pressure;
         }
     }
     impl SectionPressure for TestHydraulicSection {
         fn pressure(&self) -> Pressure {
-            self.current_pressure
+            self.pressure
+        }
+
+        fn pressure_downstream_leak_valve(&self) -> Pressure {
+            self.pressure
         }
 
         fn is_pressure_switch_pressurised(&self) -> bool {
-            self.current_pressure.get::<psi>() > 2000.
+            self.pressure.get::<psi>() > 1700.
         }
     }
 
@@ -583,7 +584,7 @@ mod tests {
                     Ratio::new::<ratio>(0.),
                 ),
 
-                hydraulic_system: TestHydraulicSection::new(Pressure::new::<psi>(0.)),
+                hydraulic_system: TestHydraulicSection::default(),
             }
         }
 
@@ -727,6 +728,7 @@ mod tests {
                 init_max_vol,
                 Volume::new::<gallon>(0.0),
                 Volume::new::<gallon>(0.1),
+                Pressure::new::<psi>(3000.),
             )
         }));
 
@@ -751,6 +753,7 @@ mod tests {
                 init_max_vol,
                 init_max_vol / 2.0,
                 Volume::new::<gallon>(0.1),
+                Pressure::new::<psi>(3000.),
             )
         }));
 
@@ -863,6 +866,7 @@ mod tests {
             init_max_vol,
             init_max_vol / 2.0,
             Volume::new::<gallon>(0.1),
+            Pressure::new::<psi>(3000.),
         )
     }
 

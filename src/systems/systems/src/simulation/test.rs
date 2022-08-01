@@ -23,7 +23,10 @@ use super::{
 };
 use crate::landing_gear::LandingGear;
 use crate::shared::arinc429::{from_arinc429, to_arinc429, Arinc429Word, SignStatus};
-use crate::simulation::{InitContext, VariableIdentifier, VariableRegistry};
+use crate::simulation::update_context::Delta;
+use crate::simulation::{
+    DeltaContext, InitContext, StartState, VariableIdentifier, VariableRegistry,
+};
 
 pub trait TestBed {
     type Aircraft: Aircraft;
@@ -45,6 +48,10 @@ pub trait TestBed {
 
     fn fail(&mut self, failure_type: FailureType) {
         self.test_bed_mut().fail(failure_type);
+    }
+
+    fn unfail(&mut self, failure_type: FailureType) {
+        self.test_bed_mut().unfail(failure_type);
     }
 
     fn command<V: FnOnce(&mut Self::Aircraft)>(&mut self, func: V) {
@@ -75,6 +82,18 @@ pub trait TestBed {
         self.test_bed_mut().indicated_airspeed()
     }
 
+    fn set_long_acc(&mut self, acc: Acceleration) {
+        self.test_bed_mut().set_long_acceleration(acc);
+    }
+
+    fn set_lat_acc(&mut self, acc: Acceleration) {
+        self.test_bed_mut().set_lat_acceleration(acc);
+    }
+
+    fn set_norm_acc(&mut self, acc: Acceleration) {
+        self.test_bed_mut().set_normal_acceleration(acc);
+    }
+
     fn set_indicated_altitude(&mut self, indicated_altitude: Length) {
         self.test_bed_mut()
             .set_indicated_altitude(indicated_altitude);
@@ -83,6 +102,14 @@ pub trait TestBed {
     fn set_ambient_temperature(&mut self, ambient_temperature: ThermodynamicTemperature) {
         self.test_bed_mut()
             .set_ambient_temperature(ambient_temperature);
+    }
+
+    fn ambient_temperature(&mut self) -> ThermodynamicTemperature {
+        self.test_bed_mut().ambient_temperature()
+    }
+
+    fn set_sim_is_ready(&mut self, is_ready: bool) {
+        self.test_bed_mut().set_is_ready(is_ready);
     }
 
     fn set_on_ground(&mut self, on_ground: bool) {
@@ -196,10 +223,17 @@ pub struct SimulationTestBed<T: Aircraft> {
 }
 impl<T: Aircraft> SimulationTestBed<T> {
     pub fn new<U: FnOnce(&mut InitContext) -> T>(aircraft_ctor_fn: U) -> Self {
+        Self::new_with_start_state(Default::default(), aircraft_ctor_fn)
+    }
+
+    pub fn new_with_start_state<U: FnOnce(&mut InitContext) -> T>(
+        start_state: StartState,
+        aircraft_ctor_fn: U,
+    ) -> Self {
         let mut variable_registry = TestVariableRegistry::default();
         let mut test_bed = Self {
             reader_writer: TestReaderWriter::new(),
-            simulation: Simulation::new(aircraft_ctor_fn, &mut variable_registry),
+            simulation: Simulation::new(start_state, aircraft_ctor_fn, &mut variable_registry),
             variable_registry,
         };
 
@@ -209,6 +243,7 @@ impl<T: Aircraft> SimulationTestBed<T> {
         test_bed.set_ambient_pressure(Pressure::new::<inch_of_mercury>(29.92));
         test_bed.set_vertical_speed(Velocity::new::<foot_per_minute>(0.));
         test_bed.set_on_ground(false);
+        test_bed.set_is_ready(true);
         test_bed.seed();
 
         test_bed
@@ -236,7 +271,7 @@ impl<T: Aircraft> SimulationTestBed<T> {
     }
 
     pub fn run_with_delta(&mut self, delta: Duration) {
-        self.simulation.tick(delta, &mut self.reader_writer);
+        self.simulation.tick(delta, 100., &mut self.reader_writer);
     }
 
     /// Runs a multiple [Simulation] ticks by subdividing given delta on the contained [Aircraft].
@@ -254,11 +289,16 @@ impl<T: Aircraft> SimulationTestBed<T> {
             if executed_duration + current_delta > delta {
                 self.simulation.tick(
                     (executed_duration + current_delta) - delta,
+                    10. + executed_duration.as_secs_f64(),
                     &mut self.reader_writer,
                 );
                 break;
             } else {
-                self.simulation.tick(current_delta, &mut self.reader_writer);
+                self.simulation.tick(
+                    current_delta,
+                    10. + executed_duration.as_secs_f64(),
+                    &mut self.reader_writer,
+                );
             }
             executed_duration += current_delta;
         }
@@ -266,6 +306,10 @@ impl<T: Aircraft> SimulationTestBed<T> {
 
     fn fail(&mut self, failure_type: FailureType) {
         self.simulation.activate_failure(failure_type);
+    }
+
+    fn unfail(&mut self, failure_type: FailureType) {
+        self.simulation.deactivate_failure(failure_type);
     }
 
     fn aircraft(&self) -> &T {
@@ -295,6 +339,10 @@ impl<T: Aircraft> SimulationTestBed<T> {
         (func)(self.simulation.aircraft(), self.simulation.electricity())
     }
 
+    fn set_is_ready(&mut self, is_ready: bool) {
+        self.write_by_name(UpdateContext::IS_READY_KEY, is_ready);
+    }
+
     fn set_indicated_airspeed(&mut self, indicated_airspeed: Velocity) {
         self.write_by_name(UpdateContext::INDICATED_AIRSPEED_KEY, indicated_airspeed);
     }
@@ -309,6 +357,10 @@ impl<T: Aircraft> SimulationTestBed<T> {
 
     fn set_ambient_temperature(&mut self, ambient_temperature: ThermodynamicTemperature) {
         self.write_by_name(UpdateContext::AMBIENT_TEMPERATURE_KEY, ambient_temperature);
+    }
+
+    fn ambient_temperature(&mut self) -> ThermodynamicTemperature {
+        self.read_by_name(UpdateContext::AMBIENT_TEMPERATURE_KEY)
     }
 
     fn set_on_ground(&mut self, on_ground: bool) {
@@ -341,6 +393,20 @@ impl<T: Aircraft> SimulationTestBed<T> {
     pub fn set_long_acceleration(&mut self, accel: Acceleration) {
         self.write_by_name(
             UpdateContext::ACCEL_BODY_Z_KEY,
+            accel.get::<foot_per_second_squared>(),
+        );
+    }
+
+    pub fn set_lat_acceleration(&mut self, accel: Acceleration) {
+        self.write_by_name(
+            UpdateContext::ACCEL_BODY_X_KEY,
+            accel.get::<foot_per_second_squared>(),
+        );
+    }
+
+    pub fn set_normal_acceleration(&mut self, accel: Acceleration) {
+        self.write_by_name(
+            UpdateContext::ACCEL_BODY_Y_KEY,
             accel.get::<foot_per_second_squared>(),
         );
     }
@@ -686,5 +752,31 @@ mod tests {
             test_bed.query_element(|e| e.update_called_before_or_after_receive_power()),
             Some(CallOrder::Before)
         );
+    }
+}
+
+#[derive(Default)]
+pub struct TestUpdateContext {
+    delta: Delta,
+}
+
+impl TestUpdateContext {
+    pub fn with_delta(mut self, delta: Duration) -> Self {
+        self.delta = delta.into();
+        self
+    }
+}
+
+impl DeltaContext for TestUpdateContext {
+    fn delta(&self) -> Duration {
+        self.delta.into()
+    }
+
+    fn delta_as_secs_f64(&self) -> f64 {
+        self.delta.into()
+    }
+
+    fn delta_as_time(&self) -> Time {
+        self.delta.into()
     }
 }

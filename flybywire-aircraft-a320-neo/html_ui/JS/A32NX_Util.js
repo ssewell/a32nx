@@ -127,6 +127,30 @@ A32NX_Util.greatCircleIntersection = (latlon1, brg1, latlon2, brg2) => {
     return delta1 < delta2 ? s1 : s2;
 };
 
+A32NX_Util.bothGreatCircleIntersections = (latlon1, brg1, latlon2, brg2) => {
+    // c.f. https://blog.mbedded.ninja/mathematics/geometry/spherical-geometry/finding-the-intersection-of-two-arcs-that-lie-on-a-sphere/
+    const Pa11 = A32NX_Util.latLonToSpherical(latlon1);
+    const latlon12 = Avionics.Utils.bearingDistanceToCoordinates(brg1 % 360, 100, latlon1.lat, latlon1.long);
+    const Pa12 = A32NX_Util.latLonToSpherical(latlon12);
+    const Pa21 = A32NX_Util.latLonToSpherical(latlon2);
+    const latlon22 = Avionics.Utils.bearingDistanceToCoordinates(brg2 % 360, 100, latlon2.lat, latlon2.long);
+    const Pa22 = A32NX_Util.latLonToSpherical(latlon22);
+
+    const N1 = math.cross(Pa11, Pa12);
+    const N2 = math.cross(Pa21, Pa22);
+
+    const L = math.cross(N1, N2);
+    const l = math.norm(L);
+
+    const I1 = math.divide(L, l);
+    const I2 = math.multiply(I1, -1);
+
+    const s1 = A32NX_Util.sphericalToLatLon(I1);
+    const s2 = A32NX_Util.sphericalToLatLon(I2);
+
+    return [s1, s2];
+};
+
 /**
  * Returns the ISA temperature for a given altitude
  * @param alt {number} altitude in ft
@@ -188,6 +212,8 @@ class UpdateThrottler {
     }
 }
 
+A32NX_Util.UpdateThrottler = UpdateThrottler;
+
 /**
  * NotificationParams class container for popups to package popup metadata
  */
@@ -243,12 +269,18 @@ class NXPopUp {
             this.params.style = style;
         }
         if (callbackYes) {
-            const yes = (typeof callbackYes === 'function') ? callbackYes : () => callbackYes;
-            Coherent.on("A32NX_POP_" + this.params.id + "_YES", yes);
+            const yes = (typeof callbackYes === "function") ? callbackYes : () => callbackYes;
+            Coherent.on(`A32NX_POP_${this.params.id}_YES`, () => {
+                Coherent.off(`A32NX_POP_${this.params.id}_YES`, null, null);
+                yes();
+            });
         }
         if (callbackNo) {
-            const no = (typeof callbackNo === 'function') ? callbackNo : () => callbackNo;
-            Coherent.on("A32NX_POP_" + this.params.id + "_NO", no);
+            const no = (typeof callbackNo === "function") ? callbackNo : () => callbackNo;
+            Coherent.on(`A32NX_POP_${this.params.id}_NO`, () => {
+                Coherent.off(`A32NX_POP_${this.params.id}_NO`, null, null);
+                no();
+            });
         }
 
         if (!this.popupListener) {
@@ -262,17 +294,52 @@ class NXPopUp {
 /**
  * NXNotif utility class to create a notification event and element
  */
+
+class NXNotifManager {
+
+    constructor() {
+        Coherent.on("keyIntercepted", (key) => this.registerIntercepts(key));
+        Coherent.call("INTERCEPT_KEY_EVENT", "PAUSE_TOGGLE", 0);
+        Coherent.call("INTERCEPT_KEY_EVENT", "PAUSE_ON", 0);
+        Coherent.call("INTERCEPT_KEY_EVENT", "PAUSE_OFF", 0);
+        Coherent.call("INTERCEPT_KEY_EVENT", "PAUSE_SET", 0);
+        this.notifications = [];
+    }
+
+    registerIntercepts(key) {
+        switch (key) {
+            case "PAUSE_TOGGLE":
+            case "PAUSE_ON":
+            case "PAUSE_OFF":
+            case "PAUSE_SET":
+                this.notifications.forEach((notif) => {
+                    notif.hideNotification();
+                });
+                this.notifications.length = 0;
+                break;
+            default:
+                break;
+        }
+    }
+
+    showNotification(params = {}) {
+        const notif = new NXNotif();
+        notif.showNotification(params);
+        this.notifications.push(notif);
+    }
+}
+
 class NXNotif {
     constructor() {
-        const title = 'A32NX ALERT';
+        const title = "A32NX ALERT";
         this.time = new Date().getTime();
         this.params = {
             id: `${title}_${this.time}`,
             title,
-            type: 'MESSAGE',
-            theme: 'GAMEPLAY',
-            image: 'IMAGE_NOTIFICATION',
-            description: 'Default Message',
+            type: "MESSAGE",
+            theme: "GAMEPLAY",
+            image: "IMAGE_NOTIFICATION",
+            description: "Default Message",
             timeout: 10000,
             time: this.time,
         };
@@ -313,13 +380,17 @@ class NXNotif {
         this.setData(params);
 
         if (!nxNotificationsListener) {
-            nxNotificationsListener = RegisterViewListener('JS_LISTENER_NOTIFICATIONS');
+            nxNotificationsListener = RegisterViewListener("JS_LISTENER_NOTIFICATIONS");
         }
-        nxNotificationsListener.triggerToAllSubscribers('SendNewNotification', this.params);
+        nxNotificationsListener.triggerToAllSubscribers("SendNewNotification", this.params);
         setTimeout(() => {
-            // TODO FIXME: May break in the future, check every update
-            nxNotificationsListener.triggerToAllSubscribers('HideNotification', this.params.type, null, this.params.id);
+            this.hideNotification();
         }, this.params.timeout);
+    }
+
+    // TODO FIXME: May break in the future, check every update
+    hideNotification() {
+        nxNotificationsListener.triggerToAllSubscribers("HideNotification", this.params.type, null, this.params.id);
     }
 }
 

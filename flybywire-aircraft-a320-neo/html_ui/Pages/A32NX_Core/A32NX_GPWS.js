@@ -94,17 +94,23 @@ class A32NX_GPWS {
         this.gpws(deltaTime);
     }
     gpws(deltaTime) {
-        const radioAlt = SimVar.GetSimVarValue("PLANE ALT ABOVE GROUND MINUS CG", "Feet");
+        const radioAlt1 = Arinc429Word.fromSimVarValue(`L:A32NX_RA_1_RADIO_ALTITUDE`);
+        const radioAlt2 = Arinc429Word.fromSimVarValue(`L:A32NX_RA_2_RADIO_ALTITUDE`);
+        const radioAlt = radioAlt1.isFailureWarning() || radioAlt1.isNoComputedData() ? radioAlt2 : radioAlt1;
+        const radioAltValid = radioAlt.isNormalOperation();
         const onGround = SimVar.GetSimVarValue("SIM ON GROUND", "Bool");
 
-        this.UpdateAltState(radioAlt);
-        this.differentiate_radioalt(radioAlt, deltaTime);
+        this.UpdateAltState(radioAltValid ? radioAlt.value : NaN);
+        this.differentiate_radioalt(radioAltValid ? radioAlt.value : NaN, deltaTime);
 
         const mda = SimVar.GetSimVarValue("L:AIRLINER_MINIMUM_DESCENT_ALTITUDE", "feet");
         const dh = SimVar.GetSimVarValue("L:AIRLINER_DECISION_HEIGHT", "feet");
         const phase = SimVar.GetSimVarValue("L:A32NX_FMGC_FLIGHT_PHASE", "Enum");
 
-        if (radioAlt >= 10 && radioAlt <= 2450 && !SimVar.GetSimVarValue("L:A32NX_GPWS_SYS_OFF", "Bool")) { //Activate between 10 - 2450 radio alt unless SYS is off
+        if (
+            radioAltValid && radioAlt.value >= 10 && radioAlt.value <= 2450 &&
+            !SimVar.GetSimVarValue("L:A32NX_GPWS_SYS_OFF", "Bool")
+        ) { //Activate between 10 - 2450 radio alt unless SYS is off
             const FlapPushButton = SimVar.GetSimVarValue("L:A32NX_GPWS_FLAPS3", "Bool");
             const FlapPosition = SimVar.GetSimVarValue("L:A32NX_FLAPS_HANDLE_INDEX", "Number");
             const FlapsInLandingConfig = FlapPushButton ? (FlapPosition === 3) : (FlapPosition === 4);
@@ -112,14 +118,14 @@ class A32NX_GPWS {
             const Airspeed = SimVar.GetSimVarValue("AIRSPEED INDICATED", "Knots");
             const gearExtended = SimVar.GetSimVarValue("GEAR TOTAL PCT EXTENDED", "Percent") > 0.9;
 
-            this.update_maxRA(radioAlt, onGround, phase);
+            this.update_maxRA(radioAlt.value, onGround, phase);
 
-            this.GPWSMode1(this.modes[0], radioAlt, vSpeed);
+            this.GPWSMode1(this.modes[0], radioAlt.value, vSpeed);
             //Mode 2 is disabled because of an issue with the terrain height simvar which causes false warnings very frequently. See PR#1742 for more info
             //this.GPWSMode2(this.modes[1], radioAlt, Airspeed, FlapsInLandingConfig, gearExtended);
-            this.GPWSMode3(this.modes[2], radioAlt, phase);
-            this.GPWSMode4(this.modes[3], radioAlt, Airspeed, FlapsInLandingConfig, gearExtended, phase);
-            this.GPWSMode5(this.modes[4], radioAlt);
+            this.GPWSMode3(this.modes[2], radioAlt.value, phase);
+            this.GPWSMode4(this.modes[3], radioAlt.value, Airspeed, FlapsInLandingConfig, gearExtended, phase);
+            this.GPWSMode5(this.modes[4], radioAlt.value);
 
         } else {
             this.modes.forEach((mode) => {
@@ -127,7 +133,7 @@ class A32NX_GPWS {
             });
 
             this.Mode3MaxBaroAlt = NaN;
-            if (onGround || radioAlt < 10) {
+            if (onGround || (radioAltValid && radioAlt < 10)) {
                 this.Mode4MaxRAAlt = NaN;
             }
 
@@ -137,18 +143,20 @@ class A32NX_GPWS {
 
         this.GPWSComputeLightsAndCallouts();
 
-        if ((mda !== 0 || dh !== -1) && phase === FmgcFlightPhases.APPROACH) {
+        if ((mda !== 0 || (dh !== -1 && dh !== -2) && phase === FmgcFlightPhases.APPROACH)) {
             let minimumsDA; //MDA or DH
             let minimumsIA; //radio or baro altitude
             const baroAlt = SimVar.GetSimVarValue("INDICATED ALTITUDE", "feet");
             if (dh >= 0) {
                 minimumsDA = dh;
-                minimumsIA = radioAlt;
+                minimumsIA = radioAlt.isNormalOperation() || radioAlt.isFunctionalTest() ? radioAlt.value : NaN;
             } else {
                 minimumsDA = mda;
                 minimumsIA = baroAlt;
             }
-            this.gpws_minimums(minimumsDA, minimumsIA);
+            if (isFinite(minimumsDA) && isFinite(minimumsIA)) {
+                this.gpws_minimums(minimumsDA, minimumsIA);
+            }
         }
     }
 
@@ -158,11 +166,11 @@ class A32NX_GPWS {
      * @param deltaTime - in milliseconds
      */
     differentiate_radioalt(radioAlt, deltaTime) {
-        if (!isNaN(this.prevRadioAlt2)) {
+        if (!isNaN(this.prevRadioAlt2) && !isNaN(radioAlt)) {
             this.RadioAltRate = (radioAlt - this.prevRadioAlt2) / (deltaTime / 1000 / 60) / 2;
             this.prevRadioAlt2 = this.prevRadioAlt;
             this.prevRadioAlt = radioAlt;
-        } else if (!isNaN(this.prevRadioAlt)) {
+        } else if (!isNaN(this.prevRadioAlt) && !isNaN(radioAlt)) {
             this.prevRadioAlt2 = this.prevRadioAlt;
             this.prevRadioAlt = radioAlt;
         } else {
@@ -403,11 +411,11 @@ class A32NX_GPWS {
             return;
         }
         const localizer = this.radnav.getBestILSBeacon();
-        if (localizer.id <= 0 || !SimVar.GetSimVarValue("NAV HAS GLIDE SLOPE:" + localizer.id, "Bool")) {
+        if (localizer.id <= 0 || !SimVar.GetSimVarValue('L:A32NX_RADIO_RECEIVER_GS_IS_VALID', 'number')) {
             mode.current = 0;
             return;
         }
-        const error = SimVar.GetSimVarValue("NAV GLIDE SLOPE ERROR:" + localizer.id, "Degrees");
+        const error = SimVar.GetSimVarValue('L:A32NX_RADIO_RECEIVER_GS_DEVIATION', 'number');
         const dots = -error * 2.5; //According to the FCOM, one dot is approx. 0.4 degrees. 1/0.4 = 2.5
 
         const minAltForWarning = dots < 2.9 ? -75 * dots + 247.5 : 30;
@@ -423,16 +431,19 @@ class A32NX_GPWS {
     }
 
     UpdateAltState(radioAlt) {
+        if (isNaN(radioAlt)) {
+            return;
+        }
         switch (this.AltCallState.value) {
             case "ground":
-                if (radioAlt > 5) {
+                if (radioAlt > 6) {
                     this.AltCallState.action("up");
                 }
                 break;
             case "over5":
-                if (radioAlt > 10) {
+                if (radioAlt > 12) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 5) {
+                } else if (radioAlt <= 6) {
                     if (this.RetardState.value !== "retardPlaying") {
                         this.core.soundManager.tryPlaySound(soundList.alt_5);
                     }
@@ -440,9 +451,9 @@ class A32NX_GPWS {
                 }
                 break;
             case "over10":
-                if (radioAlt > 20) {
+                if (radioAlt > 22) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 10) {
+                } else if (radioAlt <= 12) {
                     if (this.RetardState.value !== "retardPlaying") {
                         this.core.soundManager.tryPlaySound(soundList.alt_10);
                     }
@@ -450,87 +461,87 @@ class A32NX_GPWS {
                 }
                 break;
             case "over20":
-                if (radioAlt > 30) {
+                if (radioAlt > 32) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 20) {
+                } else if (radioAlt <= 22) {
                     this.core.soundManager.tryPlaySound(soundList.alt_20);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over30":
-                if (radioAlt > 40) {
+                if (radioAlt > 42) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 30) {
+                } else if (radioAlt <= 32) {
                     this.core.soundManager.tryPlaySound(soundList.alt_30);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over40":
-                if (radioAlt > 50) {
+                if (radioAlt > 53) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 40) {
+                } else if (radioAlt <= 42) {
                     this.core.soundManager.tryPlaySound(soundList.alt_40);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over50":
-                if (radioAlt > 100) {
+                if (radioAlt > 110) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 50) {
+                } else if (radioAlt <= 53) {
                     this.core.soundManager.tryPlaySound(soundList.alt_50);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over100":
-                if (radioAlt > 200) {
+                if (radioAlt > 210) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 100) {
+                } else if (radioAlt <= 110) {
                     this.core.soundManager.tryPlaySound(soundList.alt_100);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over200":
-                if (radioAlt > 300) {
+                if (radioAlt > 310) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 200) {
+                } else if (radioAlt <= 210) {
                     this.core.soundManager.tryPlaySound(soundList.alt_200);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over300":
-                if (radioAlt > 400) {
+                if (radioAlt > 410) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 300) {
+                } else if (radioAlt <= 310) {
                     this.core.soundManager.tryPlaySound(soundList.alt_300);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over400":
-                if (radioAlt > 500) {
+                if (radioAlt > 513) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 400) {
+                } else if (radioAlt <= 410) {
                     this.core.soundManager.tryPlaySound(soundList.alt_400);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over500":
-                if (radioAlt > 1000) {
+                if (radioAlt > 1020) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 500) {
+                } else if (radioAlt <= 513) {
                     this.core.soundManager.tryPlaySound(soundList.alt_500);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over1000":
-                if (radioAlt > 2500) {
+                if (radioAlt > 2530) {
                     this.AltCallState.action("up");
-                } else if (radioAlt <= 1000) {
+                } else if (radioAlt <= 1020) {
                     this.core.soundManager.tryPlaySound(soundList.alt_1000);
                     this.AltCallState.action("down");
                 }
                 break;
             case "over2500":
-                if (radioAlt <= 2500) {
+                if (radioAlt <= 2530) {
                     this.core.soundManager.tryPlaySound(soundList.alt_2500);
                     this.AltCallState.action("down");
                 }

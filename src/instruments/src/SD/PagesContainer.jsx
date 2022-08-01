@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { getSimVar, useInteractionEvent } from '../util.js';
 import { EngPage } from './Pages/Eng/Eng.tsx';
-import { BleedPage } from './Pages/Bleed.jsx';
+import { BleedPage } from './Pages/Bleed/Bleed.tsx';
 import { PressPage } from './Pages/Press/Press.tsx';
 import { ElecPage } from './Pages/Elec/Elec.tsx';
 import { HydPage } from './Pages/Hyd/Hyd.tsx';
@@ -11,7 +11,7 @@ import { CondPage } from './Pages/Cond/Cond.tsx';
 import { DoorPage } from './Pages/Door/Door.tsx';
 import { WheelPage } from './Pages/Wheel/Wheel.tsx';
 import { FctlPage } from './Pages/Fctl/Fctl.tsx';
-import { StatusPage } from './Pages/Status.jsx';
+import { StatusPage } from './Pages/Status/Status.tsx';
 import { CrzPage } from './Pages/Crz/Crz.tsx';
 
 export const PagesContainer = () => {

@@ -1,14 +1,16 @@
 use self::linear_actuator::Actuator;
 use crate::failures::{Failure, FailureType};
-use crate::hydraulic::electrical_pump_physics::ElectricalPumpPhysics;
+use crate::hydraulic::{
+    electrical_pump_physics::ElectricalPumpPhysics, pumps::PumpCharacteristics,
+};
 use crate::pneumatic::PressurizeableReservoir;
 use crate::shared::{
-    interpolation, low_pass_filter::LowPassFilter, ElectricalBusType, ElectricalBuses,
-    HydraulicColor,
+    interpolation, low_pass_filter::LowPassFilter, random_from_range, DelayedTrueLogicGate,
+    ElectricalBusType, ElectricalBuses, HydraulicColor, SectionPressure,
 };
 use crate::simulation::{
-    InitContext, SimulationElement, SimulationElementVisitor, SimulatorWriter, UpdateContext,
-    VariableIdentifier, Write,
+    InitContext, Read, SimulationElement, SimulationElementVisitor, SimulatorReader,
+    SimulatorWriter, UpdateContext, VariableIdentifier, Write,
 };
 
 use std::time::Duration;
@@ -23,18 +25,30 @@ use uom::si::{
     volume_rate::{gallon_per_minute, gallon_per_second},
 };
 
+pub mod aerodynamic_model;
 pub mod brake_circuit;
 pub mod electrical_generator;
 pub mod electrical_pump_physics;
 pub mod flap_slat;
+pub mod landing_gear;
 pub mod linear_actuator;
 pub mod nose_steering;
-pub mod update_iterator;
+pub mod pumps;
+pub mod trimmable_horizontal_stabilizer;
 
-pub trait SectionPressure {
-    fn pressure(&self) -> Pressure;
-    fn is_pressure_switch_pressurised(&self) -> bool;
+/// Indicates the pressure sensors info of an hydraulic circuit at different locations
+/// Information can be wrong in case of sensor failure -> do not use for physical pressure
+pub trait HydraulicPressureSensors {
+    /// Pressure switch state in pump section
+    fn pump_section_switch_pressurised(&self, pump_index: usize) -> bool;
+
+    /// Pressure switch state in system section downstream leak measurement valve
+    fn system_section_switch_pressurised(&self) -> bool;
+
+    /// Pressure transducer value in system section upstream leak measurement valve
+    fn system_section_pressure_transducer(&self) -> Pressure;
 }
+
 pub trait PressureSource {
     /// Gives the maximum available volume at current pump state if it was working at maximum available displacement
     fn delta_vol_max(&self) -> Volume;
@@ -160,12 +174,20 @@ pub trait PowerTransferUnitController {
     fn should_enable(&self) -> bool;
 }
 
+pub trait PowerTransferUnitCharacteristics {
+    fn efficiency(&self) -> Ratio;
+    fn deactivation_delta_pressure(&self) -> Pressure;
+    fn activation_delta_pressure(&self) -> Pressure;
+    fn shot_to_shot_variability(&self) -> Ratio;
+}
+
 pub struct PowerTransferUnit {
-    active_l2r_id: VariableIdentifier,
-    active_r2l_id: VariableIdentifier,
-    motor_flow_id: VariableIdentifier,
     valve_opened_id: VariableIdentifier,
     shaft_rpm_id: VariableIdentifier,
+    bark_strength_id: VariableIdentifier,
+
+    dev_efficiency_id: VariableIdentifier,
+    dev_delta_pressure: VariableIdentifier,
 
     is_enabled: bool,
     is_active_right: bool,
@@ -179,20 +201,33 @@ pub struct PowerTransferUnit {
     control_valve_opened: bool,
 
     shaft_speed: AngularVelocity,
+
+    shaft_speed_filtered: LowPassFilter<AngularVelocity>,
+
+    is_in_continuous_mode: bool,
+    is_rotating_after_delay: DelayedTrueLogicGate,
+
+    activation_delta_pressure: Pressure,
+    deactivation_delta_pressure: Pressure,
+
+    shot_to_shot_variability: Ratio,
+    shot_to_shot_activation_coefficient: f64,
+    shot_to_shot_deactivation_coefficient: f64,
+
+    duration_since_active: Duration,
+    speed_captured_at_active_duration: AngularVelocity,
+    bark_strength: u8,
+    has_stopped_since_last_write: bool,
+
+    efficiency: Ratio,
 }
 impl PowerTransferUnit {
-    const ACTIVATION_DELTA_PRESSURE_PSI: f64 = 500.;
-    const DEACTIVATION_DELTA_PRESSURE_PSI: f64 = 5.;
-
     const MIN_SPEED_SIMULATION_RPM: f64 = 50.;
-    const EFFICIENCY_LEFT_TO_RIGHT: f64 = 0.85;
-    const EFFICIENCY_RIGHT_TO_LEFT: f64 = 0.85;
-
     const DEFAULT_LEFT_DISPLACEMENT_CUBIC_INCH: f64 = 0.92;
     const MIN_RIGHT_DISPLACEMENT_CUBIC_INCH: f64 = 0.65;
     const MAX_RIGHT_DISPLACEMENT_CUBIC_INCH: f64 = 1.21;
 
-    const DISPLACEMENT_TIME_CONSTANT: Duration = Duration::from_millis(80);
+    const DISPLACEMENT_TIME_CONSTANT: Duration = Duration::from_millis(45);
 
     const PRESSURE_BREAKPOINTS_PSI: [f64; 10] =
         [-500., -250., -100., -50., -10., 0., 100., 220., 250., 500.];
@@ -211,15 +246,24 @@ impl PowerTransferUnit {
 
     const SHAFT_FRICTION: f64 = 0.12;
     const BREAKOUT_TORQUE_NM: f64 = 2.;
-    const SHAFT_INERTIA: f64 = 0.008;
+    const SHAFT_INERTIA: f64 = 0.0055;
 
-    pub fn new(context: &mut InitContext) -> Self {
+    const SHAFT_SPEED_FILTER_TIME_CONSTANT: Duration = Duration::from_millis(1500);
+
+    const DELAY_TO_DECLARE_CONTINUOUS: Duration = Duration::from_millis(1500);
+    const THRESHOLD_DELTA_TO_DECLARE_CONTINUOUS_RPM: f64 = 400.;
+    const DURATION_BEFORE_CAPTURING_BARK_STRENGTH_SPEED: Duration = Duration::from_millis(133);
+
+    pub fn new(
+        context: &mut InitContext,
+        characteristics: &impl PowerTransferUnitCharacteristics,
+    ) -> Self {
         Self {
-            active_l2r_id: context.get_identifier("HYD_PTU_ACTIVE_L2R".to_owned()),
-            active_r2l_id: context.get_identifier("HYD_PTU_ACTIVE_R2L".to_owned()),
-            motor_flow_id: context.get_identifier("HYD_PTU_MOTOR_FLOW".to_owned()),
             valve_opened_id: context.get_identifier("HYD_PTU_VALVE_OPENED".to_owned()),
             shaft_rpm_id: context.get_identifier("HYD_PTU_SHAFT_RPM".to_owned()),
+            dev_delta_pressure: context.get_identifier("HYD_PTU_DEV_DEACTIVATION_DELTA".to_owned()),
+            bark_strength_id: context.get_identifier("HYD_PTU_BARK_STRENGTH".to_owned()),
+            dev_efficiency_id: context.get_identifier("HYD_PTU_DEV_EFFICIENCY".to_owned()),
 
             is_enabled: false,
             is_active_right: false,
@@ -235,6 +279,27 @@ impl PowerTransferUnit {
             control_valve_opened: false,
 
             shaft_speed: AngularVelocity::new::<radian_per_second>(0.),
+
+            shaft_speed_filtered: LowPassFilter::<AngularVelocity>::new(
+                Self::SHAFT_SPEED_FILTER_TIME_CONSTANT,
+            ),
+
+            is_in_continuous_mode: false,
+            is_rotating_after_delay: DelayedTrueLogicGate::new(Self::DELAY_TO_DECLARE_CONTINUOUS),
+
+            activation_delta_pressure: characteristics.activation_delta_pressure(),
+            deactivation_delta_pressure: characteristics.deactivation_delta_pressure(),
+
+            shot_to_shot_variability: characteristics.shot_to_shot_variability(),
+            shot_to_shot_activation_coefficient: 1.,
+            shot_to_shot_deactivation_coefficient: 1.,
+
+            duration_since_active: Duration::default(),
+            speed_captured_at_active_duration: AngularVelocity::default(),
+            bark_strength: 0,
+            has_stopped_since_last_write: false,
+
+            efficiency: characteristics.efficiency(),
         }
     }
 
@@ -264,8 +329,10 @@ impl PowerTransferUnit {
         self.is_enabled = controller.should_enable();
 
         self.update_displacement(context, loop_left_section, loop_right_section);
-        self.update_active_state();
         self.update_shaft_physics(context, loop_left_section, loop_right_section);
+        self.update_active_state(context);
+        self.update_continuous_state(context);
+        self.capture_bark_strength();
         self.update_flows();
     }
 
@@ -281,9 +348,14 @@ impl PowerTransferUnit {
             Pressure::new::<psi>(0.)
         };
 
-        if delta_p.abs().get::<psi>() > Self::ACTIVATION_DELTA_PRESSURE_PSI {
+        if delta_p.abs() > self.activation_delta_pressure * self.shot_to_shot_activation_coefficient
+        {
             self.control_valve_opened = true;
-        } else if delta_p.abs().get::<psi>() < Self::DEACTIVATION_DELTA_PRESSURE_PSI {
+            self.shot_to_shot_activation_coefficient = self.rand_shot_to_shot();
+        } else if delta_p.abs()
+            < self.deactivation_delta_pressure * self.shot_to_shot_deactivation_coefficient
+        {
+            self.shot_to_shot_deactivation_coefficient = self.rand_shot_to_shot();
             self.control_valve_opened = false;
         }
 
@@ -304,9 +376,31 @@ impl PowerTransferUnit {
             .update(context.delta(), new_displacement);
     }
 
-    fn update_active_state(&mut self) {
-        let is_rotating =
-            self.shaft_speed.get::<revolution_per_minute>().abs() > Self::MIN_SPEED_SIMULATION_RPM;
+    /// Snapshots the ptu rotational speed after a fixed time to measure its expected "sound power level"
+    fn capture_bark_strength(&mut self) {
+        if self.duration_since_active > Self::DURATION_BEFORE_CAPTURING_BARK_STRENGTH_SPEED
+            && self
+                .speed_captured_at_active_duration
+                .get::<revolution_per_minute>()
+                == 0.
+        {
+            self.speed_captured_at_active_duration = self.shaft_speed.abs();
+            self.bark_strength =
+                Self::speed_to_bark_strength(self.speed_captured_at_active_duration);
+        }
+    }
+
+    fn update_active_state(&mut self, context: &UpdateContext) {
+        let is_rotating = self.is_rotating();
+
+        if is_rotating {
+            self.duration_since_active += context.delta();
+        } else {
+            self.duration_since_active = Duration::default();
+            self.speed_captured_at_active_duration = AngularVelocity::default();
+            self.bark_strength = 0;
+            self.has_stopped_since_last_write = true;
+        }
 
         let active_direction = self.shaft_speed.get::<revolution_per_minute>().signum();
 
@@ -339,15 +433,39 @@ impl PowerTransferUnit {
         );
         let total_torque = friction_torque + left_side_torque + right_side_torque;
 
-        if self.shaft_speed.abs().get::<revolution_per_minute>() > Self::MIN_SPEED_SIMULATION_RPM
-            || total_torque.abs().get::<newton_meter>() > Self::BREAKOUT_TORQUE_NM
+        if self.is_rotating() || total_torque.abs().get::<newton_meter>() > Self::BREAKOUT_TORQUE_NM
         {
             let acc = total_torque.get::<newton_meter>() / Self::SHAFT_INERTIA;
             self.shaft_speed +=
                 AngularVelocity::new::<radian_per_second>(acc * context.delta_as_secs_f64());
+            self.shaft_speed_filtered
+                .update(context.delta(), self.shaft_speed);
         } else {
-            self.shaft_speed = AngularVelocity::new::<radian_per_second>(0.);
+            self.shaft_speed = AngularVelocity::default();
+            self.shaft_speed_filtered.reset(AngularVelocity::default());
         }
+    }
+
+    fn update_continuous_state(&mut self, context: &UpdateContext) {
+        self.is_rotating_after_delay.update(
+            context,
+            self.shaft_speed.abs().get::<revolution_per_minute>()
+                > Self::THRESHOLD_DELTA_TO_DECLARE_CONTINUOUS_RPM,
+        );
+
+        self.is_in_continuous_mode = (self.is_in_continuous_mode
+            || self.is_rotating_after_delay.output())
+            && self.is_rotating();
+    }
+
+    pub fn update_characteristics(
+        &mut self,
+        characteristics: &impl PowerTransferUnitCharacteristics,
+    ) {
+        self.efficiency = characteristics.efficiency();
+        self.activation_delta_pressure = characteristics.activation_delta_pressure();
+        self.deactivation_delta_pressure = characteristics.deactivation_delta_pressure();
+        self.shot_to_shot_variability = characteristics.shot_to_shot_variability();
     }
 
     fn calc_generated_torque(pressure: Pressure, displacement: Volume) -> Torque {
@@ -382,12 +500,12 @@ impl PowerTransferUnit {
             // Left sends flow to right
             let flow = Self::calc_flow(self.shaft_speed.abs(), self.left_displacement);
             self.flow_to_left = -flow;
-            self.flow_to_right = flow * Self::EFFICIENCY_LEFT_TO_RIGHT;
+            self.flow_to_right = flow * self.efficiency;
             self.last_flow = flow;
         } else if shaft_rpm > Self::MIN_SPEED_SIMULATION_RPM {
             // Right sends flow to left
             let flow = Self::calc_flow(self.shaft_speed.abs(), self.right_displacement.output());
-            self.flow_to_left = flow * Self::EFFICIENCY_RIGHT_TO_LEFT;
+            self.flow_to_left = flow * self.efficiency;
             self.flow_to_right = -flow;
             self.last_flow = flow;
         } else {
@@ -402,19 +520,80 @@ impl PowerTransferUnit {
             speed.get::<revolution_per_minute>() * displacement.get::<cubic_inch>() / 231. / 60.,
         )
     }
+
+    fn is_rotating(&self) -> bool {
+        self.shaft_speed.abs().get::<revolution_per_minute>() > Self::MIN_SPEED_SIMULATION_RPM
+    }
+
+    pub fn is_in_continuous_mode(&self) -> bool {
+        self.is_in_continuous_mode
+    }
+
+    fn speed_to_bark_strength(speed: AngularVelocity) -> u8 {
+        let rpm = speed.get::<revolution_per_minute>();
+
+        if rpm > 1700. {
+            5
+        } else if rpm > 1560. {
+            4
+        } else if rpm > 1470. {
+            3
+        } else if rpm > 1370. {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn rand_shot_to_shot(&self) -> f64 {
+        random_from_range(
+            1. - self.shot_to_shot_variability.get::<ratio>(),
+            1. + self.shot_to_shot_variability.get::<ratio>(),
+        )
+    }
 }
 impl SimulationElement for PowerTransferUnit {
     fn write(&self, writer: &mut SimulatorWriter) {
-        writer.write(&self.active_l2r_id, self.is_active_left);
-        writer.write(&self.active_r2l_id, self.is_active_right);
-        writer.write(&self.motor_flow_id, self.flow());
         writer.write(&self.valve_opened_id, self.is_enabled());
-        writer.write(&self.shaft_rpm_id, self.shaft_speed);
+        writer.write(
+            &self.shaft_rpm_id,
+            (self.shaft_speed_filtered.output()).abs(),
+        );
+
+        // As write can happen slower than ptu update, if we had ptu stopping between two writes
+        // we ensure here we send the 0 value for 1 tick at least
+        // This flag is reset in the read() to finish the handshake
+        let refreshed_bark_strength = if self.has_stopped_since_last_write {
+            0
+        } else {
+            self.bark_strength
+        };
+
+        writer.write(&self.bark_strength_id, refreshed_bark_strength);
+    }
+
+    fn read(&mut self, reader: &mut SimulatorReader) {
+        // Ensuring we take dev value into account only if not zero
+        let deactivation_delta_pressure_raw = reader.read(&self.dev_delta_pressure);
+        if deactivation_delta_pressure_raw != 0. {
+            self.deactivation_delta_pressure =
+                Pressure::new::<psi>(deactivation_delta_pressure_raw);
+        }
+
+        let efficiency_raw = reader.read(&self.dev_efficiency_id);
+        if efficiency_raw != 0. {
+            self.efficiency = Ratio::new::<ratio>(efficiency_raw);
+        }
+
+        // As read/write can happen slower than ptu update, if we had ptu stopping between two writes
+        // we ensure here to reset the flag indicating we missed a stop
+        self.has_stopped_since_last_write = false;
     }
 }
 
 pub trait HydraulicCircuitController {
     fn should_open_fire_shutoff_valve(&self, pump_index: usize) -> bool;
+    fn should_open_leak_measurement_valve(&self) -> bool;
 }
 
 pub struct Accumulator {
@@ -426,6 +605,8 @@ pub struct Accumulator {
     current_flow: VolumeRate,
     current_delta_vol: Volume,
     has_control_valve: bool,
+
+    circuit_target_pressure: Pressure,
 }
 impl Accumulator {
     const FLOW_DYNAMIC_LOW_PASS: f64 = 0.7;
@@ -439,6 +620,7 @@ impl Accumulator {
         total_volume: Volume,
         fluid_vol_at_init: Volume,
         has_control_valve: bool,
+        circuit_target_pressure: Pressure,
     ) -> Self {
         // Taking care of case where init volume is maxed at accumulator capacity: we can't exceed max_volume minus a margin for gas to compress
         let limited_volume = fluid_vol_at_init.min(total_volume * 0.9);
@@ -455,6 +637,7 @@ impl Accumulator {
             current_flow: VolumeRate::new::<gallon_per_second>(0.),
             current_delta_vol: Volume::new::<gallon>(0.),
             has_control_valve,
+            circuit_target_pressure,
         }
     }
 
@@ -487,10 +670,8 @@ impl Accumulator {
             *delta_vol += volume_from_acc;
         } else if accumulator_delta_press.get::<psi>() < 0.0 {
             let fluid_volume_to_reach_equilibrium = self.total_volume
-                - Volume::new::<gallon>(
-                    (self.gas_init_precharge.get::<psi>() * self.total_volume.get::<gallon>())
-                        / 3000.,
-                );
+                - ((self.gas_init_precharge * self.total_volume) / self.circuit_target_pressure);
+
             let max_delta_vol = fluid_volume_to_reach_equilibrium - self.fluid_volume;
             let volume_to_acc = delta_vol
                 .max(Volume::new::<gallon>(0.0))
@@ -544,6 +725,8 @@ pub struct HydraulicCircuit {
 
     fluid: Fluid,
     reservoir: Reservoir,
+
+    circuit_target_pressure: Pressure,
 }
 impl HydraulicCircuit {
     const PUMP_SECTION_MAX_VOLUME_GAL: f64 = 0.8;
@@ -552,7 +735,6 @@ impl HydraulicCircuit {
     const SYSTEM_SECTION_STATIC_LEAK_GAL_P_S: f64 = 0.03;
 
     const FLUID_BULK_MODULUS_PASCAL: f64 = 1450000000.0;
-    const TARGET_PRESSURE_PSI: f64 = 3000.;
 
     // Nitrogen PSI precharge pressure
     const ACCUMULATOR_GAS_PRE_CHARGE_PSI: f64 = 1885.0;
@@ -562,6 +744,10 @@ impl HydraulicCircuit {
     // TODO firevalves are actually powered by a sub-bus (401PP DC ESS)
     const DEFAULT_FIRE_VALVE_POWERING_BUS: ElectricalBusType =
         ElectricalBusType::DirectCurrentEssential;
+
+    // TODO leak meas valves are actually powered by a sub-bus (Bus 601PP)
+    const DEFAULT_LEAK_MEASUREMENT_VALVE_POWERING_BUS: ElectricalBusType =
+        ElectricalBusType::DirectCurrentGndFltService;
 
     pub fn new(
         context: &mut InitContext,
@@ -578,6 +764,8 @@ impl HydraulicCircuit {
         pump_pressure_switch_hi_hyst: Pressure,
         connected_to_ptu_left_side: bool,
         connected_to_ptu_right_side: bool,
+
+        circuit_target_pressure: Pressure,
     ) -> Self {
         assert!(number_of_pump_sections > 0);
 
@@ -608,9 +796,10 @@ impl HydraulicCircuit {
                 fire_valve,
                 false,
                 false,
+                None,
             ));
 
-            pump_to_system_check_valves.push(CheckValve::default());
+            pump_to_system_check_valves.push(CheckValve::new());
         }
 
         let system_section_volume = high_pressure_max_volume
@@ -632,16 +821,21 @@ impl HydraulicCircuit {
                     Volume::new::<gallon>(Self::ACCUMULATOR_MAX_VOLUME_GALLONS),
                     Volume::new::<gallon>(0.),
                     false,
+                    circuit_target_pressure,
                 )),
                 system_pressure_switch_lo_hyst,
                 system_pressure_switch_hi_hyst,
                 None,
                 connected_to_ptu_left_side,
                 connected_to_ptu_right_side,
+                Some(LeakMeasurementValve::new(
+                    Self::DEFAULT_LEAK_MEASUREMENT_VALVE_POWERING_BUS,
+                )),
             ),
             pump_to_system_check_valves,
             fluid: Fluid::new(Pressure::new::<pascal>(Self::FLUID_BULK_MODULUS_PASCAL)),
             reservoir,
+            circuit_target_pressure,
         }
     }
 
@@ -665,6 +859,7 @@ impl HydraulicCircuit {
         self.reservoir.update(context, reservoir_pressure);
 
         self.update_shutoff_valves(controller);
+        self.update_leak_measurement_valves(context, controller);
 
         // Taking care of leaks / consumers / actuators volumes
         self.update_flows(context, ptu);
@@ -677,7 +872,7 @@ impl HydraulicCircuit {
         self.update_maximum_pumping_capacities(main_section_pumps, &system_section_pump);
 
         // What flow can come through each valve considering what is consumed downstream
-        self.update_maximum_valve_flows();
+        self.update_maximum_valve_flows(context);
 
         // Update final flow that will go through each valve (spliting flow between multiple valves)
         self.update_final_valves_flows();
@@ -725,9 +920,10 @@ impl HydraulicCircuit {
             .update_final_delta_vol_and_pressure(context, &self.fluid);
     }
 
-    fn update_maximum_valve_flows(&mut self) {
+    fn update_maximum_valve_flows(&mut self, context: &UpdateContext) {
         for (pump_section_idx, valve) in self.pump_to_system_check_valves.iter_mut().enumerate() {
             valve.update_flow_forecast(
+                context,
                 &self.pump_sections[pump_section_idx],
                 &self.system_section,
                 &self.fluid,
@@ -751,29 +947,43 @@ impl HydraulicCircuit {
 
     fn update_target_volumes_after_flow(&mut self) {
         for section in &mut self.pump_sections {
-            section.update_target_volume_after_flow_update(
-                Pressure::new::<psi>(Self::TARGET_PRESSURE_PSI),
-                &self.fluid,
-            );
+            section
+                .update_target_volume_after_flow_update(self.circuit_target_pressure, &self.fluid);
         }
-        self.system_section.update_target_volume_after_flow_update(
-            Pressure::new::<psi>(Self::TARGET_PRESSURE_PSI),
-            &self.fluid,
-        );
+        self.system_section
+            .update_target_volume_after_flow_update(self.circuit_target_pressure, &self.fluid);
     }
 
     fn update_flows(&mut self, context: &UpdateContext, ptu: Option<&PowerTransferUnit>) {
         for section in &mut self.pump_sections {
-            section.update_flow(context, &mut self.reservoir, ptu);
+            section.update_flow(
+                context,
+                &mut self.reservoir,
+                ptu,
+                self.circuit_target_pressure,
+            );
         }
-        self.system_section
-            .update_flow(context, &mut self.reservoir, ptu);
+        self.system_section.update_flow(
+            context,
+            &mut self.reservoir,
+            ptu,
+            self.circuit_target_pressure,
+        );
     }
 
     fn update_shutoff_valves(&mut self, controller: &impl HydraulicCircuitController) {
         self.pump_sections
             .iter_mut()
             .for_each(|section| section.update_shutoff_valve(controller));
+    }
+
+    fn update_leak_measurement_valves(
+        &mut self,
+        context: &UpdateContext,
+        controller: &impl HydraulicCircuitController,
+    ) {
+        self.system_section
+            .update_leak_measurement_valve(context, controller);
     }
 
     fn update_final_valves_flows(&mut self) {
@@ -806,10 +1016,6 @@ impl HydraulicCircuit {
         self.pump_sections[idx].pressure()
     }
 
-    pub fn system_pressure(&self) -> Pressure {
-        self.system_section.pressure()
-    }
-
     pub fn system_accumulator_fluid_volume(&self) -> Volume {
         self.system_section.accumulator_volume()
     }
@@ -828,6 +1034,10 @@ impl HydraulicCircuit {
 
     pub fn reservoir(&self) -> &Reservoir {
         &self.reservoir
+    }
+
+    pub fn system_section_pressure(&self) -> Pressure {
+        self.system_section.pressure()
     }
 
     pub fn system_section(&self) -> &impl SectionPressure {
@@ -851,11 +1061,26 @@ impl SimulationElement for HydraulicCircuit {
         visitor.visit(self);
     }
 }
+impl HydraulicPressureSensors for HydraulicCircuit {
+    fn pump_section_switch_pressurised(&self, pump_index: usize) -> bool {
+        self.pump_section(pump_index)
+            .is_pressure_switch_pressurised()
+    }
+
+    fn system_section_switch_pressurised(&self) -> bool {
+        self.system_section().is_pressure_switch_pressurised()
+    }
+
+    fn system_section_pressure_transducer(&self) -> Pressure {
+        self.system_section().pressure()
+    }
+}
 
 /// This is an hydraulic section with its own volume of fluid and pressure. It can be connected to another section
 /// through a checkvalve
 pub struct Section {
     pressure_id: VariableIdentifier,
+    pressure_switch_id: VariableIdentifier,
 
     section_id_number: usize,
 
@@ -880,6 +1105,8 @@ pub struct Section {
 
     pressure_switch: PressureSwitch,
 
+    leak_measurement_valve: Option<LeakMeasurementValve>,
+
     total_actuator_consumed_volume: Volume,
     total_actuator_returned_volume: Volume,
 }
@@ -898,12 +1125,16 @@ impl Section {
         fire_valve: Option<FireValve>,
         connected_to_ptu_left_side: bool,
         connected_to_ptu_right_side: bool,
+        leak_measurement_valve: Option<LeakMeasurementValve>,
     ) -> Self {
         let section_name: String = format!("HYD_{}_{}_{}_SECTION", loop_id, section_id, pump_id);
 
         Self {
             pressure_id: context
                 .get_identifier(format!("{}_PRESSURE", section_name))
+                .to_owned(),
+            pressure_switch_id: context
+                .get_identifier(format!("{}_PRESSURE_SWITCH", section_name))
                 .to_owned(),
             section_id_number: pump_id,
             static_leak_at_max_press,
@@ -926,6 +1157,8 @@ impl Section {
                 pressure_switch_lo_hyst,
                 PressureSwitchType::Relative,
             ),
+
+            leak_measurement_valve,
 
             total_actuator_consumed_volume: Volume::new::<gallon>(0.),
             total_actuator_returned_volume: Volume::new::<gallon>(0.),
@@ -954,6 +1187,17 @@ impl Section {
         }
     }
 
+    fn update_leak_measurement_valve(
+        &mut self,
+        context: &UpdateContext,
+        controller: &impl HydraulicCircuitController,
+    ) {
+        let pressure = self.pressure();
+        if let Some(valve) = &mut self.leak_measurement_valve {
+            valve.update(context, pressure, controller);
+        }
+    }
+
     pub fn update_target_volume_after_flow_update(
         &mut self,
         target_pressure: Pressure,
@@ -969,11 +1213,11 @@ impl Section {
         self.volume_target -= self.delta_volume_flow_pass;
     }
 
-    fn static_leak(&self, context: &UpdateContext) -> Volume {
+    fn static_leak(&self, context: &UpdateContext, target_pressure: Pressure) -> Volume {
         self.static_leak_at_max_press
             * context.delta_as_time()
             * (self.current_pressure - Pressure::new::<psi>(14.7))
-            / Pressure::new::<psi>(3000.)
+            / target_pressure
     }
 
     /// Updates hydraulic flow from consumers like accumulator / ptu / any actuator
@@ -982,8 +1226,9 @@ impl Section {
         context: &UpdateContext,
         reservoir: &mut Reservoir,
         ptu: Option<&PowerTransferUnit>,
+        target_pressure: Pressure,
     ) {
-        let static_leak = self.static_leak(context);
+        let static_leak = self.static_leak(context, target_pressure);
         let mut delta_volume_flow_pass = -static_leak;
 
         reservoir.add_return_volume(static_leak);
@@ -1080,7 +1325,12 @@ impl Section {
             + self.delta_pressure_from_delta_volume(fluid_volume_compressed, fluid);
         self.current_pressure = self.current_pressure.max(Pressure::new::<psi>(14.7));
 
-        self.pressure_switch.update(context, self.current_pressure);
+        if let Some(valve) = &self.leak_measurement_valve {
+            self.pressure_switch
+                .update(context, valve.downstream_pressure());
+        } else {
+            self.pressure_switch.update(context, self.current_pressure);
+        }
     }
 
     fn delta_pressure_from_delta_volume(&self, delta_vol: Volume, fluid: &Fluid) -> Pressure {
@@ -1141,16 +1391,35 @@ impl SimulationElement for Section {
             fire_valve.accept(visitor);
         }
 
+        if let Some(leak_meas_valve) = &mut self.leak_measurement_valve {
+            leak_meas_valve.accept(visitor);
+        }
+
         visitor.visit(self);
     }
 
     fn write(&self, writer: &mut SimulatorWriter) {
         writer.write(&self.pressure_id, self.pressure());
+
+        if self.leak_measurement_valve.is_some() {
+            writer.write(
+                &self.pressure_switch_id,
+                self.pressure_switch_state() == PressureSwitchState::Pressurised,
+            );
+        }
     }
 }
 impl SectionPressure for Section {
     fn pressure(&self) -> Pressure {
         self.pressure()
+    }
+
+    fn pressure_downstream_leak_valve(&self) -> Pressure {
+        if let Some(valve) = &self.leak_measurement_valve {
+            valve.downstream_pressure()
+        } else {
+            self.pressure()
+        }
     }
 
     fn is_pressure_switch_pressurised(&self) -> bool {
@@ -1214,24 +1483,43 @@ impl SimulationElement for FireValve {
 /// - A physical flow, that is mandatory to pass through the valve, caused by pressure difference between
 /// upstream and downstream.
 
-#[derive(Default)]
 pub struct CheckValve {
     current_volume: Volume,
     max_virtual_volume: Volume,
+
+    delta_pressure: LowPassFilter<Pressure>,
 }
 impl CheckValve {
+    const AGRESSIVENESS_FACTOR: f64 = 5.;
+    const DELTA_PRESSURE_FILTER_TIME_CONSTANT: Duration = Duration::from_millis(60);
+
+    fn new() -> Self {
+        Self {
+            current_volume: Volume::default(),
+            max_virtual_volume: Volume::default(),
+            delta_pressure: LowPassFilter::<Pressure>::new(
+                Self::DELTA_PRESSURE_FILTER_TIME_CONSTANT,
+            ),
+        }
+    }
+
     fn volume_to_equalize_pressures(
-        &self,
+        &mut self,
+        context: &UpdateContext,
         upstream_section: &Section,
         downstream_section: &Section,
         fluid: &Fluid,
     ) -> Volume {
-        let delta_pressure = upstream_section.pressure() - downstream_section.pressure();
+        let new_delta_pressure = upstream_section.pressure() - downstream_section.pressure();
 
-        if delta_pressure > Pressure::new::<psi>(0.) {
-            downstream_section.max_high_press_volume
+        self.delta_pressure
+            .update(context.delta(), new_delta_pressure);
+
+        if self.delta_pressure.output() > Pressure::new::<psi>(0.) {
+            Self::AGRESSIVENESS_FACTOR
+                * downstream_section.max_high_press_volume
                 * upstream_section.max_high_press_volume
-                * delta_pressure
+                * self.delta_pressure.output()
                 / (fluid.bulk_mod() * downstream_section.max_high_press_volume
                     + fluid.bulk_mod() * upstream_section.max_high_press_volume)
         } else {
@@ -1243,12 +1531,13 @@ impl CheckValve {
     /// the valve
     pub fn update_flow_forecast(
         &mut self,
+        context: &UpdateContext,
         upstream_section: &Section,
         downstream_section: &Section,
         fluid: &Fluid,
     ) {
         let physical_volume_transferred =
-            self.volume_to_equalize_pressures(upstream_section, downstream_section, fluid);
+            self.volume_to_equalize_pressures(context, upstream_section, downstream_section, fluid);
 
         let mut available_volume_from_upstream = (upstream_section.max_pumpable_volume
             - upstream_section.volume_target)
@@ -1264,9 +1553,79 @@ impl CheckValve {
     }
 }
 
+pub struct LeakMeasurementValve {
+    open_ratio: LowPassFilter<Ratio>,
+
+    is_powered: bool,
+    powered_by: ElectricalBusType,
+
+    upstream_pressure: Pressure,
+    downstream_pressure: Pressure,
+}
+impl LeakMeasurementValve {
+    const VALVE_RESPONSE_TIME_CONSTANT: Duration = Duration::from_millis(500);
+
+    fn new(powered_by: ElectricalBusType) -> Self {
+        Self {
+            open_ratio: LowPassFilter::<Ratio>::new(Self::VALVE_RESPONSE_TIME_CONSTANT),
+            is_powered: false,
+            powered_by,
+            upstream_pressure: Pressure::default(),
+            downstream_pressure: Pressure::default(),
+        }
+    }
+
+    fn update(
+        &mut self,
+        context: &UpdateContext,
+        upstream_pressure: Pressure,
+        valve_controller: &impl HydraulicCircuitController,
+    ) {
+        self.upstream_pressure = upstream_pressure;
+
+        self.update_open_state(context, valve_controller);
+
+        self.update_downstream_pressure();
+    }
+
+    fn update_open_state(
+        &mut self,
+        context: &UpdateContext,
+        valve_controller: &impl HydraulicCircuitController,
+    ) {
+        let opening_ratio = if self.is_powered {
+            if valve_controller.should_open_leak_measurement_valve() {
+                Ratio::new::<ratio>(1.)
+            } else {
+                Ratio::new::<ratio>(0.)
+            }
+        } else {
+            Ratio::new::<ratio>(1.)
+        };
+
+        self.open_ratio.update(context.delta(), opening_ratio);
+    }
+
+    fn update_downstream_pressure(&mut self) {
+        let current_open_state = self.open_ratio.output();
+
+        self.downstream_pressure = self.upstream_pressure * current_open_state * current_open_state;
+    }
+
+    fn downstream_pressure(&self) -> Pressure {
+        self.downstream_pressure
+    }
+}
+impl SimulationElement for LeakMeasurementValve {
+    fn receive_power(&mut self, buses: &impl ElectricalBuses) {
+        self.is_powered = buses.is_powered(self.powered_by);
+    }
+}
+
 pub struct Reservoir {
     level_id: VariableIdentifier,
     low_level_id: VariableIdentifier,
+    low_air_press_id: VariableIdentifier,
 
     max_capacity: Volume,
     max_gaugeable: Volume,
@@ -1303,6 +1662,9 @@ impl Reservoir {
             level_id: context.get_identifier(format!("HYD_{}_RESERVOIR_LEVEL", hyd_loop_id)),
             low_level_id: context
                 .get_identifier(format!("HYD_{}_RESERVOIR_LEVEL_IS_LOW", hyd_loop_id)),
+            low_air_press_id: context
+                .get_identifier(format!("HYD_{}_RESERVOIR_AIR_PRESSURE_IS_LOW", hyd_loop_id)),
+
             max_capacity,
             max_gaugeable,
             current_level,
@@ -1415,6 +1777,7 @@ impl SimulationElement for Reservoir {
     fn write(&self, writer: &mut SimulatorWriter) {
         writer.write(&self.level_id, self.fluid_level_from_gauge());
         writer.write(&self.low_level_id, self.is_low_level());
+        writer.write(&self.low_air_press_id, self.is_low_air_pressure());
     }
 }
 impl PressurizeableReservoir for Reservoir {
@@ -1431,9 +1794,9 @@ pub struct Pump {
     delta_vol_max: Volume,
     current_displacement: Volume,
     current_flow: VolumeRate,
-    current_max_displacement: Volume,
-    press_breakpoints: [f64; 9],
-    displacement_carac: [f64; 9],
+    current_max_displacement: LowPassFilter<Volume>,
+
+    pump_characteristics: PumpCharacteristics,
 
     speed: AngularVelocity,
 
@@ -1442,17 +1805,18 @@ pub struct Pump {
 impl Pump {
     const SECONDS_PER_MINUTES: f64 = 60.;
     const FLOW_CONSTANT_RPM_CUBIC_INCH_TO_GPM: f64 = 231.;
-    const AIR_PRESSURE_BREAKPTS_PSI: [f64; 9] = [0., 5., 10., 15., 20., 30., 50., 70., 100.];
-    const AIR_PRESSURE_CARAC_RATIO: [f64; 9] = [0.0, 0.1, 0.6, 0.8, 0.9, 1., 1., 1., 1.];
 
-    fn new(press_breakpoints: [f64; 9], displacement_carac: [f64; 9]) -> Self {
+    const MAX_DISPLACEMENT_FILTER_TIME_CONSTANT: Duration = Duration::from_millis(150);
+
+    fn new(pump_characteristics: PumpCharacteristics) -> Self {
         Self {
             delta_vol_max: Volume::new::<gallon>(0.),
             current_displacement: Volume::new::<gallon>(0.),
             current_flow: VolumeRate::new::<gallon_per_second>(0.),
-            current_max_displacement: Volume::new::<gallon>(0.),
-            press_breakpoints,
-            displacement_carac,
+            current_max_displacement: LowPassFilter::<Volume>::new(
+                Self::MAX_DISPLACEMENT_FILTER_TIME_CONSTANT,
+            ),
+            pump_characteristics,
 
             speed: AngularVelocity::new::<revolution_per_minute>(0.),
 
@@ -1474,9 +1838,12 @@ impl Pump {
 
         let theoretical_displacement = self.calculate_displacement(section, controller);
 
-        self.current_max_displacement = self.cavitation_efficiency * theoretical_displacement;
+        self.current_max_displacement.update(
+            context.delta(),
+            self.cavitation_efficiency * theoretical_displacement,
+        );
 
-        let max_flow = Self::calculate_flow(speed, self.current_max_displacement)
+        let max_flow = Self::calculate_flow(speed, self.current_max_displacement.output())
             .max(VolumeRate::new::<gallon_per_second>(0.));
 
         let max_flow_available_from_reservoir =
@@ -1486,15 +1853,12 @@ impl Pump {
     }
 
     fn update_cavitation(&mut self, reservoir: &Reservoir) {
-        self.cavitation_efficiency = Ratio::new::<ratio>(interpolation(
-            &Self::AIR_PRESSURE_BREAKPTS_PSI,
-            &Self::AIR_PRESSURE_CARAC_RATIO,
-            reservoir.air_pressure().get::<psi>(),
-        ));
-
-        if reservoir.is_empty() {
-            self.cavitation_efficiency = Ratio::new::<ratio>(0.);
-        }
+        self.cavitation_efficiency = if !reservoir.is_empty() {
+            self.pump_characteristics
+                .cavitation_efficiency(reservoir.air_pressure())
+        } else {
+            Ratio::new::<ratio>(0.)
+        };
     }
 
     fn calculate_displacement<T: PumpController>(
@@ -1503,11 +1867,8 @@ impl Pump {
         controller: &T,
     ) -> Volume {
         if controller.should_pressurise() {
-            Volume::new::<cubic_inch>(interpolation(
-                &self.press_breakpoints,
-                &self.displacement_carac,
-                section.pressure().get::<psi>(),
-            ))
+            self.pump_characteristics
+                .current_displacement(section.pressure())
         } else {
             Volume::new::<cubic_inch>(0.)
         }
@@ -1522,10 +1883,11 @@ impl Pump {
                     / self.speed.get::<revolution_per_minute>(),
             );
             self.current_max_displacement
+                .output()
                 .min(displacement)
                 .max(Volume::new::<cubic_inch>(0.))
         } else {
-            self.current_max_displacement
+            self.current_max_displacement.output()
         }
     }
 
@@ -1595,27 +1957,23 @@ pub struct ElectricPump {
     pump_physics: ElectricalPumpPhysics,
 }
 impl ElectricPump {
-    const NOMINAL_SPEED: f64 = 7600.0;
-    const DISPLACEMENT_BREAKPTS: [f64; 9] = [
-        0.0, 500.0, 1000.0, 1500.0, 2175.0, 2850.0, 3080.0, 3100.0, 3500.0,
-    ];
-    const DISPLACEMENT_MAP: [f64; 9] = [0.263, 0.263, 0.263, 0.263, 0.263, 0.2, 0.0, 0.0, 0.0];
-
     pub fn new(
         context: &mut InitContext,
         id: &str,
         bus_type: ElectricalBusType,
         max_current: ElectricCurrent,
+        pump_characteristics: PumpCharacteristics,
     ) -> Self {
+        let regulated_speed = pump_characteristics.regulated_speed();
         Self {
             cavitation_id: context.get_identifier(format!("HYD_{}_EPUMP_CAVITATION", id)),
-            pump: Pump::new(Self::DISPLACEMENT_BREAKPTS, Self::DISPLACEMENT_MAP),
+            pump: Pump::new(pump_characteristics),
             pump_physics: ElectricalPumpPhysics::new(
                 context,
                 id,
                 bus_type,
                 max_current,
-                AngularVelocity::new::<revolution_per_minute>(Self::NOMINAL_SPEED),
+                regulated_speed,
             ),
         }
     }
@@ -1646,6 +2004,10 @@ impl ElectricPump {
 
     pub fn flow(&self) -> VolumeRate {
         self.pump.flow()
+    }
+
+    pub fn speed(&self) -> AngularVelocity {
+        self.pump.speed
     }
 }
 impl PressureSource for ElectricPump {
@@ -1699,27 +2061,26 @@ pub struct EngineDrivenPump {
     pump: Pump,
 }
 impl EngineDrivenPump {
-    const DISPLACEMENT_BREAKPTS: [f64; 9] = [
-        0.0, 500.0, 1000.0, 1500.0, 2800.0, 2950.0, 3000.0, 3020.0, 3500.0,
-    ];
-    const DISPLACEMENT_MAP: [f64; 9] = [2.4, 2.4, 2.4, 2.4, 2.4, 2.4, 2.2, 1.0, 0.0];
-
-    pub fn new(context: &mut InitContext, id: &str) -> Self {
+    pub fn new(
+        context: &mut InitContext,
+        id: &str,
+        pump_characteristics: PumpCharacteristics,
+    ) -> Self {
         Self {
             active_id: context.get_identifier(format!("HYD_{}_EDPUMP_ACTIVE", id)),
             is_active: false,
             speed: AngularVelocity::new::<revolution_per_minute>(0.),
-            pump: Pump::new(Self::DISPLACEMENT_BREAKPTS, Self::DISPLACEMENT_MAP),
+            pump: Pump::new(pump_characteristics),
         }
     }
 
-    pub fn update<T: PumpController>(
+    pub fn update(
         &mut self,
         context: &UpdateContext,
         section: &impl SectionPressure,
         reservoir: &Reservoir,
         pump_speed: AngularVelocity,
-        controller: &T,
+        controller: &impl PumpController,
     ) {
         self.speed = pump_speed;
         self.pump
@@ -1894,32 +2255,27 @@ pub struct RamAirTurbine {
     position: f64,
 }
 impl RamAirTurbine {
-    const DISPLACEMENT_BREAKPTS: [f64; 9] = [
-        0.0, 500.0, 1000.0, 1500.0, 2100.0, 2300.0, 2600.0, 2700.0, 3500.0,
-    ];
-    const DISPLACEMENT_MAP: [f64; 9] = [0.5, 0.8, 1.15, 1.15, 1.15, 0.8, 0.3, 0.0, 0.0];
-
     // Speed to go from 0 to 1 stow position per sec. 1 means full deploying in 1s
     const STOWING_SPEED: f64 = 1.;
 
-    pub fn new(context: &mut InitContext) -> Self {
+    pub fn new(context: &mut InitContext, pump_characteristics: PumpCharacteristics) -> Self {
         Self {
             stow_position_id: context.get_identifier("HYD_RAT_STOW_POSITION".to_owned()),
 
             deployment_commanded: false,
-            pump: Pump::new(Self::DISPLACEMENT_BREAKPTS, Self::DISPLACEMENT_MAP),
+            pump: Pump::new(pump_characteristics),
             pump_controller: AlwaysPressurisePumpController::new(),
             wind_turbine: WindTurbine::new(context),
             position: 0.,
         }
     }
 
-    pub fn update<T: RamAirTurbineController>(
+    pub fn update(
         &mut self,
         context: &UpdateContext,
         section: &impl SectionPressure,
         reservoir: &Reservoir,
-        controller: &T,
+        controller: &impl RamAirTurbineController,
     ) {
         // Once commanded, stays commanded forever
         self.deployment_commanded = controller.should_deploy() || self.deployment_commanded;
@@ -1937,14 +2293,14 @@ impl RamAirTurbine {
         &mut self,
         delta_time: &Duration,
         indicated_airspeed: Velocity,
-        pressure: Pressure,
+        pressure: &impl SectionPressure,
     ) {
         self.wind_turbine.update(
             delta_time,
             indicated_airspeed,
             self.position,
             self.delta_vol_max(),
-            pressure,
+            pressure.pressure(),
         );
     }
 
@@ -2088,9 +2444,20 @@ mod tests {
             )
         }));
 
-        let drawn_volume =
-            test_bed.command_element(|r| r.try_take_volume(Volume::new::<gallon>(10.)));
-        assert!(drawn_volume.get::<gallon>() == 5. - Reservoir::MIN_USABLE_VOLUME_GAL);
+        let volume_taken =
+            test_bed.command_element(|e| e.try_take_volume(Volume::new::<gallon>(10.)));
+
+        assert!(volume_taken.get::<gallon>() == 5. - Reservoir::MIN_USABLE_VOLUME_GAL);
+    }
+
+    #[test]
+    fn leak_measurement_valve_init_with_zero_pressures() {
+        let test_bed = SimulationTestBed::from(ElementCtorFn(|_| {
+            LeakMeasurementValve::new(ElectricalBusType::DirectCurrentEssential)
+        }));
+
+        assert!(test_bed.query_element(|e| e.downstream_pressure == Pressure::new::<psi>(0.)));
+        assert!(test_bed.query_element(|e| e.upstream_pressure == Pressure::new::<psi>(0.)));
     }
 
     #[test]
@@ -2212,6 +2579,9 @@ mod tests {
             fire_valve,
             false,
             false,
+            Some(LeakMeasurementValve::new(
+                HydraulicCircuit::DEFAULT_LEAK_MEASUREMENT_VALVE_POWERING_BUS,
+            )),
         )
     }
 
@@ -2262,11 +2632,12 @@ mod tests {
             Pressure::new::<psi>(1800.),
             true,
             false,
+            Pressure::new::<psi>(3000.),
         )
     }
 
     fn engine_driven_pump(context: &mut InitContext) -> EngineDrivenPump {
-        EngineDrivenPump::new(context, "DEFAULT")
+        EngineDrivenPump::new(context, "DEFAULT", PumpCharacteristics::a320_edp())
     }
 
     #[cfg(test)]

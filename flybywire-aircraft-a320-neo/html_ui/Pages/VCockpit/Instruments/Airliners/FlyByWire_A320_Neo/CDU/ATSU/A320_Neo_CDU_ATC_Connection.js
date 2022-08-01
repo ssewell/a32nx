@@ -1,19 +1,21 @@
 class CDUAtcConnection {
     static ShowPage(mcdu) {
         mcdu.clearDisplay();
+        mcdu.page.Current = mcdu.page.ATCConnection;
+
         mcdu.setTemplate([
-            ["CONNECTION"],
+            ["\xa0CONNECTION"],
             [""],
             ["<NOTIFICATION"],
             [""],
             [""],
-            ["CONNECTION"],
+            ["\xa0CONNECTION"],
             ["<STATUS"],
             [""],
             [""],
-            ["", "MAX UPLINK\xa0[color]inop"],
-            ["", "DELAY>[color]inop"],
-            ["ATC MENU"],
+            ["", "MAX UPLINK\xa0"],
+            ["", "DELAY>"],
+            ["\xa0ATC MENU"],
             ["<RETURN"]
         ]);
 
@@ -35,7 +37,18 @@ class CDUAtcConnection {
             return mcdu.getDelaySwitchPage();
         };
         mcdu.onLeftInput[5] = () => {
-            CDUAtcMenu.ShowPage1(mcdu);
+            CDUAtcMenu.ShowPage(mcdu);
+        };
+
+        mcdu.rightInputDelay[4] = () => {
+            return mcdu.getDelaySwitchPage();
+        };
+        mcdu.onRightInput[4] = () => {
+            if (mcdu.atsu.atc.fansMode() === Atsu.FansMode.FansA) {
+                CDUAtcMaxUplinkDelay.ShowPage(mcdu);
+            } else {
+                mcdu.setScratchpadMessage(NXSystemMessages.keyNotActive);
+            }
         };
     }
 }

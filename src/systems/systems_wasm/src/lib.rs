@@ -1,22 +1,26 @@
-#![cfg(any(target_arch = "wasm32", doc))]
 #[macro_use]
 pub mod aspects;
 mod electrical;
 mod failures;
+mod msfs;
 
-use crate::aspects::{ExecuteOn, MsfsAspectBuilder};
-use crate::electrical::{electrical_buses, MsfsAuxiliaryPowerUnit};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::msfs::legacy::{AircraftVariable, NamedVariable};
+#[cfg(target_arch = "wasm32")]
+use ::msfs::legacy::{AircraftVariable, NamedVariable};
+
+use crate::aspects::{Aspect, ExecuteOn, MsfsAspectBuilder};
+use crate::electrical::{auxiliary_power_unit, electrical_buses};
+use ::msfs::{
+    sim_connect::{data_definition, Period, SimConnect, SimConnectRecv, SIMCONNECT_OBJECT_ID_USER},
+    sys, MSFSEvent,
+};
 use failures::Failures;
 use fxhash::FxHashMap;
-use msfs::{
-    legacy::{AircraftVariable, NamedVariable},
-    sim_connect::{data_definition, Period, SimConnect, SimConnectRecv, SIMCONNECT_OBJECT_ID_USER},
-    MSFSEvent,
-};
 use std::fmt::{Display, Formatter};
 use std::{error::Error, time::Duration};
 use systems::shared::ElectricalBusType;
-use systems::simulation::InitContext;
+use systems::simulation::{InitContext, StartState};
 use systems::{
     failures::FailureType,
     simulation::{
@@ -24,95 +28,45 @@ use systems::{
     },
 };
 
-/// A concern that should be handled by the bridging layer. Examples are
-/// the handling of events which move flaps up and down, triggering of brakes, etc.
-pub trait Aspect {
-    /// Attempts to read data with the given identifier.
-    /// Returns `Some` when reading was successful, `None` otherwise.
-    fn read(&mut self, _identifier: &VariableIdentifier) -> Option<f64> {
-        None
-    }
-
-    /// Attempts to write the value with the given identifier.
-    /// Returns true when the writing was successful and deemed sufficient,
-    /// false otherwise.
-    ///
-    /// Note that there may be cases where multiple types write the same data.
-    /// For such situations, after a successful write the function can return false.
-    fn write(&mut self, _identifier: &VariableIdentifier, _value: f64) -> bool {
-        false
-    }
-
-    /// Attempts to handle the given message, returning true
-    /// when the message was handled and false otherwise.
-    fn handle_message(
-        &mut self,
-        _message: &SimConnectRecv,
-        _variables: &mut MsfsVariableRegistry,
-    ) -> bool {
-        false
-    }
-
-    /// Executes before a simulation tick runs.
-    fn pre_tick(
-        &mut self,
-        _variables: &mut MsfsVariableRegistry,
-        _sim_connect: &mut SimConnect,
-        _delta: Duration,
-    ) -> Result<(), Box<dyn Error>> {
-        Ok(())
-    }
-
-    /// Executes after a simulation tick ran.
-    fn post_tick(
-        &mut self,
-        _variables: &mut MsfsVariableRegistry,
-        _sim_connect: &mut SimConnect,
-    ) -> Result<(), Box<dyn Error>> {
-        Ok(())
-    }
-}
-
 /// Type used to configure and build a simulation and a handler which acts as a bridging layer
 /// between the simulation and Microsoft Flight Simulator.
 pub struct MsfsSimulationBuilder<'a, 'b> {
     variable_registry: Option<MsfsVariableRegistry>,
     key_prefix: String,
+    start_state: StartState,
     sim_connect: &'a mut SimConnect<'b>,
-    apu: Option<MsfsAuxiliaryPowerUnit>,
     failures: Option<Failures>,
-    additional_aspects: Vec<Box<dyn Aspect>>,
+    aspects: Vec<Box<dyn Aspect>>,
 }
 
 impl<'a, 'b> MsfsSimulationBuilder<'a, 'b> {
-    pub fn new(key_prefix: &str, sim_connect: &'a mut SimConnect<'b>) -> Self {
+    pub fn new(
+        key_prefix: &str,
+        start_state_variable: Variable,
+        sim_connect: &'a mut SimConnect<'b>,
+    ) -> Self {
+        let start_state_variable_value: VariableValue = (&start_state_variable).into();
+
         Self {
             variable_registry: Some(MsfsVariableRegistry::new(key_prefix.into())),
+            start_state: start_state_variable_value.read().into(),
             key_prefix: key_prefix.into(),
             sim_connect,
-            apu: None,
             failures: None,
-            additional_aspects: vec![],
+            aspects: vec![],
         }
     }
 
     pub fn build<T: Aircraft, U: FnOnce(&mut InitContext) -> T>(
-        mut self,
+        self,
         aircraft_ctor_fn: U,
     ) -> Result<(Simulation<T>, MsfsHandler), Box<dyn Error>> {
-        let mut aspects: Vec<Box<dyn Aspect>> = vec![];
-        if self.apu.is_some() {
-            aspects.push(Box::new(self.apu.unwrap()));
-        }
-
-        aspects.append(&mut self.additional_aspects);
-
         let mut registry = self.variable_registry.unwrap();
-        let simulation = Simulation::new(aircraft_ctor_fn, &mut registry);
+        let simulation = Simulation::new(self.start_state, aircraft_ctor_fn, &mut registry);
 
         Ok((
             simulation,
-            MsfsHandler::new(registry, aspects, self.failures, self.sim_connect)?,
+            MsfsHandler::new(registry, self.aspects, self.failures, self.sim_connect)?,
         ))
     }
 
@@ -125,7 +79,7 @@ impl<'a, 'b> MsfsSimulationBuilder<'a, 'b> {
         let variable_registry = &mut self.variable_registry.as_mut().unwrap();
         let mut builder = MsfsAspectBuilder::new(&mut self.sim_connect, variable_registry);
         (builder_func)(&mut builder)?;
-        self.additional_aspects.push(Box::new(builder.build()));
+        self.aspects.push(Box::new(builder.build()));
 
         Ok(self)
     }
@@ -143,19 +97,14 @@ impl<'a, 'b> MsfsSimulationBuilder<'a, 'b> {
     }
 
     pub fn with_auxiliary_power_unit(
-        mut self,
-        is_available_variable_name: &str,
+        self,
+        is_available_variable: Variable,
         fuel_valve_number: u8,
     ) -> Result<Self, Box<dyn Error>> {
-        if let Some(registry) = &mut self.variable_registry {
-            self.apu = Some(MsfsAuxiliaryPowerUnit::new(
-                registry,
-                is_available_variable_name.into(),
-                fuel_valve_number,
-            )?);
-        }
-
-        Ok(self)
+        self.with_aspect(auxiliary_power_unit(
+            is_available_variable,
+            fuel_valve_number,
+        ))
     }
 
     pub fn with_failures(mut self, failures: Vec<(u64, FailureType)>) -> Self {
@@ -226,7 +175,8 @@ impl MsfsHandler {
                     if let Some(failures) = &self.failures {
                         Self::read_failures_into_simulation(failures, simulation);
                     }
-                    simulation.tick(delta_time, self);
+
+                    simulation.tick(delta_time, self.time.simulation_time(), self);
                     self.post_tick(sim_connect)?;
                 }
             }
@@ -309,7 +259,7 @@ impl SimulatorReaderWriter for MsfsHandler {
             .unwrap_or_else(|| {
                 self.variables
                     .as_ref()
-                    .map(|registry| registry.read(identifier).unwrap_or(0.))
+                    .map(|registry| registry.read(identifier))
                     .unwrap_or(0.)
             })
     }
@@ -401,7 +351,7 @@ impl From<&Variable> for VariableValue {
         match value {
             Variable::Aircraft(name, units, index, ..) => {
                 let index = *index;
-                VariableValue::Aircraft(match AircraftVariable::from(&name, units, index) {
+                VariableValue::Aircraft(match AircraftVariable::from(name, units, index) {
                     Ok(aircraft_variable) => aircraft_variable,
                     Err(error) => panic!(
                         "Error while trying to create aircraft variable named '{}': {}",
@@ -432,14 +382,14 @@ pub enum VariableType {
     Aspect = 2,
 }
 
-impl From<VariableType> for u8 {
+impl From<VariableType> for usize {
     fn from(value: VariableType) -> Self {
-        value as u8
+        value as usize
     }
 }
 
-impl From<u8> for VariableType {
-    fn from(value: u8) -> Self {
+impl From<usize> for VariableType {
+    fn from(value: usize) -> Self {
         match value {
             0 => Self::Aircraft,
             1 => Self::Named,
@@ -483,7 +433,7 @@ pub struct MsfsVariableRegistry {
     named_variable_prefix: String,
     name_to_identifier: FxHashMap<String, VariableIdentifier>,
     next_variable_identifier: FxHashMap<VariableType, VariableIdentifier>,
-    variables: FxHashMap<VariableIdentifier, VariableValue>,
+    variables: [Vec<VariableValue>; 3],
 }
 
 impl MsfsVariableRegistry {
@@ -492,7 +442,7 @@ impl MsfsVariableRegistry {
             named_variable_prefix,
             name_to_identifier: FxHashMap::default(),
             next_variable_identifier: FxHashMap::default(),
-            variables: FxHashMap::default(),
+            variables: [vec![], vec![], vec![]],
         }
     }
 
@@ -513,7 +463,7 @@ impl MsfsVariableRegistry {
 
     pub fn register_many(&mut self, variables: &[Variable]) -> Vec<VariableIdentifier> {
         variables
-            .into_iter()
+            .iter()
             .map(|variable| self.register(variable))
             .collect()
     }
@@ -539,21 +489,19 @@ impl MsfsVariableRegistry {
                 }
 
                 let value: VariableValue = (&variable).into();
-                self.variables.insert(identifier, value);
+                self.variables[identifier.identifier_type()]
+                    .insert(identifier.identifier_index(), value);
 
                 identifier
             }
         }
     }
 
-    fn read(&self, identifier: &VariableIdentifier) -> Option<f64> {
-        match self.variables.get(identifier) {
-            Some(variable_value) => Some(variable_value.read()),
-            None => None,
-        }
+    fn read(&self, identifier: &VariableIdentifier) -> f64 {
+        self.variables[identifier.identifier_type()][identifier.identifier_index()].read()
     }
 
-    fn read_many(&self, identifiers: &[VariableIdentifier]) -> Vec<Option<f64>> {
+    fn read_many(&self, identifiers: &[VariableIdentifier]) -> Vec<f64> {
         identifiers
             .iter()
             .map(|identifier| self.read(identifier))
@@ -561,10 +509,7 @@ impl MsfsVariableRegistry {
     }
 
     fn write(&mut self, identifier: &VariableIdentifier, value: f64) {
-        match self.variables.get_mut(identifier) {
-            Some(variable_value) => variable_value.write(value),
-            None => (),
-        }
+        self.variables[identifier.identifier_type()][identifier.identifier_index()].write(value);
     }
 }
 
@@ -587,7 +532,7 @@ struct SimulationTime {
 }
 
 impl SimulationTime {
-    const REQUEST_ID: u32 = 0;
+    const REQUEST_ID: sys::DWORD = 0;
 }
 
 struct Time {
@@ -600,7 +545,7 @@ impl Time {
         sim_connect.request_data_on_sim_object::<SimulationTime>(
             SimulationTime::REQUEST_ID,
             SIMCONNECT_OBJECT_ID_USER,
-            Period::SimFrame,
+            Period::VisualFrame,
         )?;
 
         Ok(Self {
@@ -614,15 +559,25 @@ impl Time {
         self.previous_simulation_time_value = simulation_time.value;
     }
 
+    fn simulation_time(&self) -> f64 {
+        self.previous_simulation_time_value
+    }
+
     fn is_pausing(&self) -> bool {
         self.next_delta == 0.
     }
 
     fn take(&mut self) -> Duration {
-        let value = self.next_delta;
+        let delta = Duration::from_secs_f64(self.next_delta);
         self.next_delta = 0.;
 
-        Duration::from_secs_f64(value)
+        const MAX_ALLOWED_DELTA_TIME: Duration = Duration::from_millis(500);
+        if delta > MAX_ALLOWED_DELTA_TIME {
+            println!("SYSTEM WASM CAPPING ABNORMAL DELTA TIME OF {:?}.", delta);
+            MAX_ALLOWED_DELTA_TIME
+        } else {
+            delta
+        }
     }
 }
 
@@ -632,41 +587,24 @@ const RANGE_32KPOS_VAL_FROM_SIMCONNECT: f64 =
     MAX_32KPOS_VAL_FROM_SIMCONNECT - MIN_32KPOS_VAL_FROM_SIMCONNECT;
 const OFFSET_32KPOS_VAL_FROM_SIMCONNECT: f64 = 16384.;
 // Takes a 32k position type from simconnect, returns a value from scaled from 0 to 1
-pub fn sim_connect_32k_pos_to_f64(sim_connect_axis_value: u32) -> f64 {
+pub fn sim_connect_32k_pos_to_f64(sim_connect_axis_value: sys::DWORD) -> f64 {
     let casted_value = (sim_connect_axis_value as i32) as f64;
     let scaled_value =
         (casted_value + OFFSET_32KPOS_VAL_FROM_SIMCONNECT) / RANGE_32KPOS_VAL_FROM_SIMCONNECT;
-
+    scaled_value.min(1.).max(0.)
+}
+// Takes a 32k position type from simconnect, returns a value from scaled from 0 to 1 (inverted)
+pub fn sim_connect_32k_pos_inv_to_f64(sim_connect_axis_value: sys::DWORD) -> f64 {
+    let casted_value = -1. * (sim_connect_axis_value as i32) as f64;
+    let scaled_value =
+        (casted_value + OFFSET_32KPOS_VAL_FROM_SIMCONNECT) / RANGE_32KPOS_VAL_FROM_SIMCONNECT;
     scaled_value.min(1.).max(0.)
 }
 // Takes a [0:1] f64 and returns a simconnect 32k position type
-pub fn f64_to_sim_connect_32k_pos(scaled_axis_value: f64) -> u32 {
+pub fn f64_to_sim_connect_32k_pos(scaled_axis_value: f64) -> sys::DWORD {
     let back_to_position_format = ((scaled_axis_value) * RANGE_32KPOS_VAL_FROM_SIMCONNECT)
         - OFFSET_32KPOS_VAL_FROM_SIMCONNECT;
     let to_i32 = back_to_position_format as i32;
-    let to_u32 = to_i32 as u32;
 
-    to_u32
-}
-
-#[cfg(test)]
-mod sim_connect_type_casts {
-    use super::*;
-    #[test]
-    fn min_simconnect_value() {
-        // We expect to get first element of YS1
-        assert!(sim_connect_32k_pos_to_f64(u32::MAX - 16384) <= 0.001);
-    }
-    #[test]
-    fn middle_simconnect_value() {
-        // We expect to get first element of YS1
-        let val = sim_connect_32k_pos_to_f64(0);
-        assert!(val <= 0.501 && val >= 0.499);
-    }
-
-    #[test]
-    fn max_simconnect_value() {
-        // We expect to get first element of YS1
-        assert!(sim_connect_32k_pos_to_f64(16384) >= 0.999);
-    }
+    to_i32 as sys::DWORD
 }

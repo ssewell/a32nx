@@ -108,6 +108,7 @@ struct ap_raw_data
   boolean_T is_engine_operative_2;
   real_T altimeter_setting_left_mbar;
   real_T altimeter_setting_right_mbar;
+  real_T total_weight_kg;
 };
 
 #endif
@@ -234,6 +235,7 @@ struct ap_data
   boolean_T is_engine_operative_1;
   boolean_T is_engine_operative_2;
   boolean_T altimeter_setting_changed;
+  real_T total_weight_kg;
 };
 
 #endif
@@ -314,6 +316,26 @@ typedef enum {
   vertical_mode_SRS_GA = 41,
   vertical_mode_TCAS = 50
 } vertical_mode;
+
+#endif
+
+#ifndef DEFINED_TYPEDEF_FOR_lateral_mode_
+#define DEFINED_TYPEDEF_FOR_lateral_mode_
+
+typedef enum {
+  lateral_mode_NONE = 0,
+  lateral_mode_HDG = 10,
+  lateral_mode_TRACK = 11,
+  lateral_mode_NAV = 20,
+  lateral_mode_LOC_CPT = 30,
+  lateral_mode_LOC_TRACK = 31,
+  lateral_mode_LAND = 32,
+  lateral_mode_FLARE = 33,
+  lateral_mode_ROLL_OUT = 34,
+  lateral_mode_RWY = 40,
+  lateral_mode_RWY_TRACK = 41,
+  lateral_mode_GA_TRACK = 50
+} lateral_mode;
 
 #endif
 #endif

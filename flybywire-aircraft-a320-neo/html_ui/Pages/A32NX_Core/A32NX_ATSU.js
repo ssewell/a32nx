@@ -1,29 +1,16 @@
-const msgSep = "{white}------------------------{end}";
-const srcMap = {
-    "FAA": "faa",
-    "IVAO": "ivao",
-    "MSFS": "ms",
-    "NOAA": "aviationweather",
-    "PILOTEDGE": "pilotedge",
-    "VATSIM": "vatsim"
-};
-
-function wordWrapToStringList(text, maxLength) {
-    const result = [];
-    let line = [];
-    let length = 0;
-    text.split(" ").forEach(function (word) {
-        if ((length + word.length) >= maxLength) {
-            result.push(line.join(" "));
-            line = []; length = 0;
-        }
-        length += word.length + 1;
-        line.push(word);
-    });
-    if (line.length > 0) {
-        result.push(line.join(" "));
+function translateAtsuMessageType(type) {
+    switch (type) {
+        case Atsu.AtsuMessageType.Freetext:
+            return "FREETEXT";
+        case Atsu.AtsuMessageType.METAR:
+            return "METAR";
+        case Atsu.AtsuMessageType.TAF:
+            return "TAF";
+        case Atsu.AtsuMessageType.ATIS:
+            return "ATIS";
+        default:
+            return "UNKNOWN";
     }
-    return result;
 }
 
 function fetchTimeValue() {
@@ -37,93 +24,12 @@ function fetchTimeValue() {
     return null;
 }
 
-const getMETAR = async (icaos, lines, updateView) => {
-    const storedMetarSrc = NXDataStore.get("CONFIG_METAR_SRC", "MSFS");
-    for (const icao of icaos) {
-        if (icao !== "") {
-            await NXApi.getMetar(icao, srcMap[storedMetarSrc])
-                .then((data) => {
-                    lines.push(`{cyan}METAR ${icao}{end}`);
-                    const newLines = wordWrapToStringList(data.metar, 25);
-                    newLines.forEach(l => lines.push(`{green}${l}{end}`));
-                    lines.push(msgSep);
-                })
-                .catch(() => {
-                    lines.push(`{cyan}METAR ${icao}{end}`);
-                    lines.push('{amber}STATION NOT AVAILABLE{end}');
-                    lines.push(msgSep);
-                });
-        }
-    }
-    updateView();
-};
-
-const getTAF = async (icaos, lines, updateView) => {
-    const storedTafSrc = NXDataStore.get("CONFIG_TAF_SRC", "NOAA");
-    for (const icao of icaos) {
-        if (icao !== "") {
-            await NXApi.getTaf(icao, srcMap[storedTafSrc])
-                .then((data) => {
-                    lines.push(`{cyan}TAF ${icao}{end}`);
-                    const newLines = wordWrapToStringList(data.taf, 25);
-                    newLines.forEach(l => lines.push(`{green}${l}{end}`));
-                    lines.push(msgSep);
-                })
-                .catch(() => {
-                    lines.push(`{cyan}TAF ${icao}{end}`);
-                    lines.push('{amber}STATION NOT AVAILABLE{end}');
-                    lines.push(msgSep);
-                });
-        }
-    }
-    updateView();
-};
-
-const getATIS = async (icao, lines, type, store, updateView) => {
-    const storedAtisSrc = NXDataStore.get("CONFIG_ATIS_SRC", "FAA");
-    if (icao !== "") {
-        await NXApi.getAtis(icao, srcMap[storedAtisSrc])
-            .then((data) => {
-                let atisData;
-                switch (type) {
-                    case 0:
-                        if ("arr" in data) {
-                            atisData = data.arr;
-                        } else {
-                            atisData = data.combined;
-                        }
-                        break;
-                    case 1:
-                        if ("dep" in data) {
-                            atisData = data.dep;
-                        } else {
-                            atisData = data.combined;
-                        }
-                        break;
-                    default:
-                        atisData = data.combined;
-                }
-                lines.push(`{cyan}ATIS ${icao}{end}`);
-                const newLines = wordWrapToStringList(atisData, 25);
-                newLines.forEach(l => lines.push(`{green}${l}{end}`));
-                lines.push(msgSep);
-            })
-            .catch(() => {
-                lines.push(`{cyan}ATIS ${icao}{end}`);
-                lines.push('{amber}D-ATIS NOT AVAILABLE{end}');
-                lines.push(msgSep);
-            });
-    }
-    store["sendStatus"] = "SENT";
-    updateView();
-};
-
 /**
  *  Converts lbs to kg
  * @param {string | number} value
  */
 const lbsToKg = (value) => {
-    return (+value * 0.453592).toString();
+    return (+value * 0.4535934).toString();
 };
 
 /**
@@ -135,7 +41,7 @@ const getSimBriefOfp = (mcdu, updateView, callback = () => {}) => {
     const simBriefUserId = NXDataStore.get("CONFIG_SIMBRIEF_USERID", "");
 
     if (!simBriefUserId) {
-        mcdu.addNewMessage(NXFictionalMessages.noSimBriefUser);
+        mcdu.setScratchpadMessage(NXFictionalMessages.noSimBriefUser);
         throw new Error("No SimBrief pilot ID provided");
     }
 
@@ -157,16 +63,20 @@ const getSimBriefOfp = (mcdu, updateView, callback = () => {}) => {
             mcdu.simbrief["blockFuel"] = mcdu.simbrief["units"] === 'kgs' ? data.fuel.plan_ramp : lbsToKg(data.fuel.plan_ramp);
             mcdu.simbrief["payload"] = mcdu.simbrief["units"] === 'kgs' ? data.weights.payload : lbsToKg(data.weights.payload);
             mcdu.simbrief["estZfw"] = mcdu.simbrief["units"] === 'kgs' ? data.weights.est_zfw : lbsToKg(data.weights.est_zfw);
-            mcdu.simbrief["paxCount"] = data.weights.pax_count;
-            mcdu.simbrief["paxWeight"] = mcdu.simbrief["units"] === 'kgs' ? data.weights.pax_weight : lbsToKg(data.weights.pax_weight);
-            mcdu.simbrief["cargo"] = mcdu.simbrief["units"] === 'kgs' ? data.weights.cargo : lbsToKg(data.weights.cargo);
+            mcdu.simbrief["paxCount"] = data.weights.pax_count_actual;
+            mcdu.simbrief["bagCount"] = data.weights.bag_count_actual;
+            mcdu.simbrief["paxWeight"] = data.weights.pax_weight;
+            mcdu.simbrief["bagWeight"] = data.weights.bag_weight;
+            mcdu.simbrief["freight"] = data.weights.freight_added;
+            mcdu.simbrief["cargo"] = data.weights.cargo;
             mcdu.simbrief["costIndex"] = data.general.costindex;
             mcdu.simbrief["navlog"] = data.navlog.fix;
-            mcdu.simbrief["icao_airline"] = typeof data.general.icao_airline === 'string' ? data.general.icao_airline : "";
-            mcdu.simbrief["flight_number"] = data.general.flight_number;
+            mcdu.simbrief["callsign"] = data.atc.callsign;
             mcdu.simbrief["alternateIcao"] = data.alternate.icao_code;
             mcdu.simbrief["alternateTransAlt"] = parseInt(data.alternate.trans_alt, 10);
             mcdu.simbrief["alternateTransLevel"] = parseInt(data.alternate.trans_level, 10);
+            mcdu.simbrief["alternateAvgWindDir"] = parseInt(data.alternate.avg_wind_dir, 10);
+            mcdu.simbrief["alternateAvgWindSpd"] = parseInt(data.alternate.avg_wind_spd, 10);
             mcdu.simbrief["avgTropopause"] = data.general.avg_tropopause;
             mcdu.simbrief["ete"] = data.times.est_time_enroute;
             mcdu.simbrief["blockTime"] = data.times.est_block;
@@ -179,6 +89,8 @@ const getSimBriefOfp = (mcdu, updateView, callback = () => {}) => {
             mcdu.simbrief["sendStatus"] = "DONE";
 
             callback();
+
+            updateView();
 
             return mcdu.simbrief;
         })
@@ -205,14 +117,12 @@ const insertUplink = (mcdu) => {
         costIndex,
         alternateIcao,
         avgTropopause,
-        icao_airline,
-        flight_number
+        callsign
     } = mcdu.simbrief;
 
     const fromTo = `${originIcao}/${destinationIcao}`;
-    const fltNbr = `${icao_airline}${flight_number}`;
 
-    mcdu.addNewMessage(NXSystemMessages.uplinkInsertInProg);
+    mcdu.setScratchpadMessage(NXSystemMessages.uplinkInsertInProg);
 
     /**
      * AOC ACT F-PLN UPLINK
@@ -233,7 +143,7 @@ const insertUplink = (mcdu) => {
 
             setTimeout(async () => {
                 await uplinkRoute(mcdu);
-                mcdu.addNewMessage(NXSystemMessages.aocActFplnUplink);
+                mcdu.setScratchpadMessage(NXSystemMessages.aocActFplnUplink);
             }, mcdu.getDelayRouteChange());
 
             if (mcdu.page.Current === mcdu.page.InitPageA) {
@@ -241,7 +151,7 @@ const insertUplink = (mcdu) => {
             }
         }
     });
-    mcdu.updateFlightNo(fltNbr, (result) => {
+    mcdu.updateFlightNo(callsign, (result) => {
         if (result) {
             if (mcdu.page.Current === mcdu.page.InitPageA) {
                 CDUInitPage.ShowPage1(mcdu);
@@ -266,13 +176,13 @@ const addWaypointAsync = (fix, mcdu, routeIdent, via) => {
     const wpIndex = mcdu.flightPlanManager.getWaypointsCount() - 1;
     if (via) {
         return new Promise((res, rej) => {
-            mcdu.insertWaypointsAlongAirway(routeIdent, wpIndex, via, (result) => {
-                if (result) {
+            mcdu.insertWaypointsAlongAirway(routeIdent, wpIndex, via).then((result) => {
+                if (result >= 0) {
                     console.log("Inserted waypoint: " + routeIdent + " via " + via);
                     res(true);
                 } else {
                     console.log('AWY/WPT MISMATCH ' + routeIdent + " via " + via);
-                    mcdu.addNewMessage(NXSystemMessages.awyWptMismatch);
+                    mcdu.setScratchpadMessage(NXSystemMessages.awyWptMismatch);
                     res(false);
                 }
             });
@@ -291,7 +201,7 @@ const addWaypointAsync = (fix, mcdu, routeIdent, via) => {
                     }).catch(console.error);
                 } else {
                     console.log('NOT IN DATABASE ' + routeIdent);
-                    mcdu.addNewMessage(NXSystemMessages.notInDatabase);
+                    mcdu.setScratchpadMessage(NXSystemMessages.notInDatabase);
                     res(false);
                 }
             });
@@ -305,7 +215,7 @@ const addLatLonWaypoint = async (mcdu, lat, lon) => {
         await mcdu.flightPlanManager.addUserWaypoint(wp);
     } catch (err) {
         if (err instanceof McduMessage) {
-            mcdu.addNewMessage(err);
+            mcdu.setScratchpadMessage(err);
         } else {
             console.error(err);
         }
@@ -344,7 +254,7 @@ const uplinkRoute = async (mcdu) => {
             await addWaypointAsync(fix, mcdu, fix.ident);
             continue;
         } else {
-            if (fix.via_airway === 'DCT') {
+            if (fix.via_airway === 'DCT' || fix.via_airway.match(/^NAT[A-Z]$/)) {
                 if (fix.type === 'apt' && nextFix === undefined) {
                     break;
                 }

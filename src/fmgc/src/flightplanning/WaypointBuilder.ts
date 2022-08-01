@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import { LegType, TurnDirection } from '@fmgc/types/fstypes/FSEnums';
+import { Minutes } from 'msfs-geo';
 import { FlightPlanManager } from './FlightPlanManager';
 import { GeoMath } from './GeoMath';
 
@@ -36,7 +38,7 @@ export class WaypointBuilder {
    * @param instrument The base instrument instance.
    * @returns The built waypoint.
    */
-    public static fromCoordinates(ident: string, coordinates: LatLongAlt, instrument: BaseInstrument, additionalData?: Record<string, unknown>): WayPoint {
+    public static fromCoordinates(ident: string, coordinates: LatLongAlt, instrument: BaseInstrument, additionalData?: Record<string, unknown>, icao?: string): WayPoint {
         const waypoint = new WayPoint(instrument);
         waypoint.type = 'W';
 
@@ -46,7 +48,7 @@ export class WaypointBuilder {
         waypoint.ident = ident;
         waypoint.infos.ident = ident;
 
-        waypoint.icao = `W      ${ident}`;
+        waypoint.icao = icao ?? `W      ${ident}`;
         waypoint.infos.icao = waypoint.icao;
 
         waypoint.additionalData = additionalData ?? {};
@@ -96,5 +98,33 @@ export class WaypointBuilder {
         const coordinates = fpm.getCoordinatesAtNMFromDestinationAlongFlightPlan(distanceFromDestination);
 
         return WaypointBuilder.fromCoordinates(ident, coordinates, instrument);
+    }
+
+    public static fromWaypointManualHold(
+        waypoint: WayPoint,
+        holdDirection: TurnDirection,
+        inboundCourse: Degrees,
+        holdLength: NauticalMiles | undefined,
+        holdTime: Minutes | undefined,
+        instrument: BaseInstrument,
+    ): WayPoint {
+        const newWaypoint = WaypointBuilder.fromCoordinates(waypoint.ident, waypoint.infos.coordinates, instrument);
+
+        newWaypoint.icao = waypoint.icao;
+        newWaypoint.infos = waypoint.infos;
+
+        newWaypoint.additionalData.legType = LegType.HM;
+        newWaypoint.turnDirection = holdDirection;
+        newWaypoint.additionalData.course = inboundCourse;
+        newWaypoint.additionalData.distance = holdLength;
+        newWaypoint.additionalData.distanceInMinutes = holdTime;
+
+        newWaypoint.speedConstraint = waypoint.speedConstraint;
+        newWaypoint.legAltitudeDescription = waypoint.legAltitudeDescription;
+        newWaypoint.legAltitude1 = waypoint.legAltitude1;
+        newWaypoint.legAltitude2 = waypoint.legAltitude2;
+        newWaypoint.additionalData.constraintType = waypoint.additionalData.constraintType;
+
+        return newWaypoint;
     }
 }

@@ -3,7 +3,29 @@
 #include "RegPolynomials.h"
 #include "SimVars.h"
 #include "Tables.h"
+#include "ThrustLimits.h"
 #include "common.h"
+
+#include "ini_type_conversion.h"
+
+#define FILENAME_FADEC_CONF_DIRECTORY "\\work\\AircraftStates\\"
+#define FILENAME_FADEC_CONF_FILE_EXTENSION ".ini"
+#define CONFIGURATION_SECTION_FUEL "FUEL"
+
+#define CONFIGURATION_SECTION_FUEL_CENTER_QUANTITY "FUEL_CENTER_QUANTITY"
+#define CONFIGURATION_SECTION_FUEL_LEFT_QUANTITY "FUEL_LEFT_QUANTITY"
+#define CONFIGURATION_SECTION_FUEL_RIGHT_QUANTITY "FUEL_RIGHT_QUANTITY"
+#define CONFIGURATION_SECTION_FUEL_LEFT_AUX_QUANTITY "FUEL_LEFT_AUX_QUANTITY"
+#define CONFIGURATION_SECTION_FUEL_RIGHT_AUX_QUANTITY "FUEL_RIGHT_AUX_QUANTITY"
+
+/* Values in gallons */
+struct Configuration {
+  double fuelCenter = 0;
+  double fuelLeft = 400;
+  double fuelRight = fuelLeft;
+  double fuelLeftAux = 228;
+  double fuelRightAux = fuelLeftAux;
+};
 
 class EngineControl {
  private:
@@ -12,6 +34,9 @@ class EngineControl {
   Polynomial* poly;
   Timer timerLeft;
   Timer timerRight;
+  Timer timerFuel;
+
+  std::string confFilename = FILENAME_FADEC_CONF_DIRECTORY;
 
   bool simPaused;
   double animationDeltaTime;
@@ -27,6 +52,10 @@ class EngineControl {
   double engineState;
   double engineStarter;
   double engineIgniter;
+
+  double packs;
+  double nai;
+  double wai;
 
   double simCN1;
   double simN1;
@@ -55,20 +84,31 @@ class EngineControl {
   int engineImbalanced;
   double paramImbalance;
 
-  const double LBS_TO_KGS = 0.453592;
-  const double KGS_TO_LBS = 2.20462;
+  const double LBS_TO_KGS = 0.4535934;
+  const double KGS_TO_LBS = 1/0.4535934;
   const double FUEL_THRESHOLD = 661;  // lbs/sec
+
+  bool isFlexActive = false;
+  double prevThrustLimitType = 0;
+  double prevFlexTemperature = 0;
+
+  const double waitTime = 10;
+  const double transitionTime = 30;
+
+  bool isTransitionActive = false;
+  double transitionFactor = 0;
+  double transitionStartTime = 0;
 
   /// <summary>
   /// Generate Idle/ Initial Engine Parameters (non-imbalanced)
   /// </summary>
-  void generateIdleParameters(double pressAltitude, double ambientTemp, double ambientPressure) {
+  void generateIdleParameters(double pressAltitude, double mach, double ambientTemp, double ambientPressure) {
     double idleCN1;
     double idleCFF;
 
-    idleCN1 = iCN1(pressAltitude, ambientTemp);
+    idleCN1 = iCN1(pressAltitude, mach, ambientTemp);
     idleN1 = idleCN1 * sqrt(ratios->theta2(0, ambientTemp));
-    idleN2 = iCN2(pressAltitude) * sqrt(ratios->theta(ambientTemp));
+    idleN2 = iCN2(pressAltitude, mach) * sqrt(ratios->theta(ambientTemp));
     idleCFF = poly->correctedFuelFlow(idleCN1, 0, pressAltitude);                                               // lbs/hr
     idleFF = idleCFF * LBS_TO_KGS * ratios->delta2(0, ambientPressure) * sqrt(ratios->theta2(0, ambientTemp));  // Kg/hr
     idleEGT = poly->correctedEGT(idleCN1, idleCFF, 0, pressAltitude) * ratios->theta2(0, ambientTemp);
@@ -219,6 +259,7 @@ class EngineControl {
       if (engineState == 4 || engineState == 14) {
         if (engineIgniter == 2 && engineStarter == 1) {
           engineState = 3;
+          resetTimer = 1;
         } else if (engineStarter == 0 && simN2 < 0.05 && egtFbw <= ambientTemp) {
           engineState = 0;
           resetTimer = 1;
@@ -622,26 +663,28 @@ class EngineControl {
   void checkPayload() {
     double fuelWeightGallon = simVars->getFuelWeightGallon();
     double aircraftEmptyWeight = simVars->getEmptyWeight();                                   // in LBS
+    double conversionFactor = simVars->getConversionFactor();
+    double perPaxWeightLbs = simVars->getPerPaxWeight() / conversionFactor;                   // in LBS
     double aircraftTotalWeight = simVars->getTotalWeight();                                   // in LBS
     double fuelTotalWeight = simVars->getFuelTotalQuantity() * fuelWeightGallon;              // in LBS
     double payloadTotalWeight = aircraftTotalWeight - aircraftEmptyWeight - fuelTotalWeight;  // in LBS
 
-    double paxRows1to6Actual = simVars->getPaxRows1to6Actual() * 185;                       // in LBS
-    double paxRows7to13Actual = simVars->getPaxRows7to13Actual() * 185;                     // in LBS
-    double paxRows14to21Actual = simVars->getPaxRows14to21Actual() * 185;                   // in LBS
-    double paxRows22to29Actual = simVars->getPaxRows22to29Actual() * 185;                   // in LBS
-    double paxRows1to6Desired = simVars->getPaxRows1to6Desired() * 185;                     // in LBS
-    double paxRows7to13Desired = simVars->getPaxRows7to13Desired() * 185;                   // in LBS
-    double paxRows14to21Desired = simVars->getPaxRows14to21Desired() * 185;                 // in LBS
-    double paxRows22to29Desired = simVars->getPaxRows22to29Desired() * 185;                 // in LBS
-    double cargoFwdContainerActual = simVars->getCargoFwdContainerActual() * KGS_TO_LBS;    // in LBS
-    double cargoAftContainerActual = simVars->getCargoAftContainerActual() * KGS_TO_LBS;    // in LBS
-    double cargoAftBaggageActual = simVars->getCargoAftBaggageActual() * KGS_TO_LBS;        // in LBS
-    double cargoAftBulkActual = simVars->getCargoAftBulkActual() * KGS_TO_LBS;              // in LBS
-    double cargoFwdContainerDesired = simVars->getCargoFwdContainerDesired() * KGS_TO_LBS;  // in LBS
-    double cargoAftContainerDesired = simVars->getCargoAftContainerDesired() * KGS_TO_LBS;  // in LBS
-    double cargoAftBaggageDesired = simVars->getCargoAftBaggageDesired() * KGS_TO_LBS;      // in LBS
-    double cargoAftBulkDesired = simVars->getCargoAftBulkDesired() * KGS_TO_LBS;            // in LBS
+    double paxRows1to6Actual = simVars->getPaxRows1to6Actual() * perPaxWeightLbs;                       // in LBS
+    double paxRows7to13Actual = simVars->getPaxRows7to13Actual() * perPaxWeightLbs;                     // in LBS
+    double paxRows14to21Actual = simVars->getPaxRows14to21Actual() * perPaxWeightLbs;                   // in LBS
+    double paxRows22to29Actual = simVars->getPaxRows22to29Actual() * perPaxWeightLbs;                   // in LBS
+    double paxRows1to6Desired = simVars->getPaxRows1to6Desired() * perPaxWeightLbs;                     // in LBS
+    double paxRows7to13Desired = simVars->getPaxRows7to13Desired() * perPaxWeightLbs;                   // in LBS
+    double paxRows14to21Desired = simVars->getPaxRows14to21Desired() * perPaxWeightLbs;                 // in LBS
+    double paxRows22to29Desired = simVars->getPaxRows22to29Desired() * perPaxWeightLbs;                 // in LBS
+    double cargoFwdContainerActual = simVars->getCargoFwdContainerActual() / conversionFactor;    // in LBS
+    double cargoAftContainerActual = simVars->getCargoAftContainerActual() / conversionFactor;    // in LBS
+    double cargoAftBaggageActual = simVars->getCargoAftBaggageActual() / conversionFactor;        // in LBS
+    double cargoAftBulkActual = simVars->getCargoAftBulkActual() / conversionFactor;              // in LBS
+    double cargoFwdContainerDesired = simVars->getCargoFwdContainerDesired() / conversionFactor;  // in LBS
+    double cargoAftContainerDesired = simVars->getCargoAftContainerDesired() / conversionFactor;  // in LBS
+    double cargoAftBaggageDesired = simVars->getCargoAftBaggageDesired() / conversionFactor;      // in LBS
+    double cargoAftBulkDesired = simVars->getCargoAftBulkDesired() / conversionFactor;            // in LBS
     double paxTotalWeightActual = (paxRows1to6Actual + paxRows7to13Actual + paxRows14to21Actual + paxRows22to29Actual);
     double paxTotalWeightDesired = (paxRows1to6Desired + paxRows7to13Desired + paxRows14to21Desired + paxRows22to29Desired);
     double cargoTotalWeightActual = (cargoFwdContainerActual + cargoAftContainerActual + cargoAftBaggageActual + cargoAftBulkActual);
@@ -713,6 +756,9 @@ class EngineControl {
     double fuelTotalActual = leftQuantity + rightQuantity + leftAuxQuantity + rightAuxQuantity + centerQuantity;  // LBS
     double fuelTotalPre = fuelLeftPre + fuelRightPre + fuelAuxLeftPre + fuelAuxRightPre + fuelCenterPre;          // LBS
     double deltaFuelRate = abs(fuelTotalActual - fuelTotalPre) / (fuelWeightGallon * deltaTime);                  // LBS/ sec
+
+    double engine1State = simVars->getEngine1State();
+    double engine2State = simVars->getEngine2State();
 
     // Check Development State for UI
     double devState = simVars->getDeveloperState();
@@ -889,29 +935,146 @@ class EngineControl {
       SimConnect_SetDataOnSimObject(hSimConnect, DataTypesID::FuelLeftMain, SIMCONNECT_OBJECT_ID_USER, 0, 0, sizeof(double), &fuelLeft);
       SimConnect_SetDataOnSimObject(hSimConnect, DataTypesID::FuelRightMain, SIMCONNECT_OBJECT_ID_USER, 0, 0, sizeof(double), &fuelRight);
     }
+
+    // Will save the current fuel quantities if on the ground AND engines being shutdown
+    if (timerFuel.elapsed() >= 1000 && simVars->getSimOnGround() &&
+        (engine1State == 0 || engine1State == 10 || engine1State == 4 || engine1State == 14 || engine2State == 0 || engine2State == 10 ||
+         engine2State == 4 || engine2State == 14)) {
+      Configuration configuration;
+
+      configuration.fuelLeft = simVars->getFuelLeftPre() / simVars->getFuelWeightGallon();
+      configuration.fuelRight = simVars->getFuelRightPre() / simVars->getFuelWeightGallon();
+      configuration.fuelCenter = simVars->getFuelCenterPre() / simVars->getFuelWeightGallon();
+      configuration.fuelLeftAux = simVars->getFuelAuxLeftPre() / simVars->getFuelWeightGallon();
+      configuration.fuelRightAux = simVars->getFuelAuxRightPre() / simVars->getFuelWeightGallon();
+
+      saveFuelInConfiguration(configuration);
+      timerFuel.reset();
+    }
+  }
+
+  void updateThrustLimits(double simulationTime,
+                          double altitude,
+                          double ambientTemp,
+                          double ambientPressure,
+                          double mach,
+                          double simN1highest,
+                          double packs,
+                          double nai,
+                          double wai) {
+    double idle = simVars->getEngineIdleN1();
+    double flexTemp = simVars->getFlexTemp();
+    double thrustLimitType = simVars->getThrustLimitType();
+    double to = 0;
+    double ga = 0;
+    double toga = 0;
+    double clb = 0;
+    double mct = 0;
+    double flex_to = 0;
+    double flex_ga = 0;
+    double flex = 0;
+
+    // Write all N1 Limits
+    to = limitN1(0, min(16600.0, pressAltitude), ambientTemp, ambientPressure, 0, packs, nai, wai);
+    ga = limitN1(1, min(16600.0, pressAltitude), ambientTemp, ambientPressure, 0, packs, nai, wai);
+    if (flexTemp > 0) {
+      flex_to = limitN1(0, min(16600.0, pressAltitude), ambientTemp, ambientPressure, flexTemp, packs, nai, wai);
+      flex_ga = limitN1(1, min(16600.0, pressAltitude), ambientTemp, ambientPressure, flexTemp, packs, nai, wai);
+    }
+    clb = limitN1(2, pressAltitude, ambientTemp, ambientPressure, 0, packs, nai, wai);
+    mct = limitN1(3, pressAltitude, ambientTemp, ambientPressure, 0, packs, nai, wai);
+
+    // transition between TO and GA limit -----------------------------------------------------------------------------
+    double machFactorLow = max(0.0, min(1.0, (mach - 0.04) / 0.04));
+    toga = to + (ga - to) * machFactorLow;
+    flex = flex_to + (flex_ga - flex_to) * machFactorLow;
+
+    // adaption of CLB due to FLX limit if necessary ------------------------------------------------------------------
+
+    if ((prevThrustLimitType != 3 && thrustLimitType == 3) || (prevFlexTemperature == 0 && flexTemp > 0)) {
+      isFlexActive = true;
+    } else if ((flexTemp == 0) || (thrustLimitType == 4)) {
+      isFlexActive = false;
+    }
+
+    if (isFlexActive && !isTransitionActive && thrustLimitType == 1) {
+      isTransitionActive = true;
+      transitionStartTime = simulationTime;
+      transitionFactor = 0.2;
+      // transitionFactor = (clb - flex) / transitionTime;
+    } else if (!isFlexActive) {
+      isTransitionActive = false;
+      transitionStartTime = 0;
+      transitionFactor = 0;
+    }
+
+    double deltaThrust = 0;
+
+    if (isTransitionActive) {
+      double timeDifference = max(0, (simulationTime - transitionStartTime) - waitTime);
+
+      if (timeDifference > 0 && clb > flex) {
+        deltaThrust = min(clb - flex, timeDifference * transitionFactor);
+      }
+
+      if (flex + deltaThrust >= clb) {
+        isFlexActive = false;
+        isTransitionActive = false;
+      }
+    }
+
+    if (isFlexActive) {
+      clb = min(clb, flex) + deltaThrust;
+    }
+
+    prevThrustLimitType = thrustLimitType;
+    prevFlexTemperature = flexTemp;
+
+    // thrust transitions for MCT and TOGA ----------------------------------------------------------------------------
+
+    // get factors
+    double machFactor = max(0.0, min(1.0, ((mach - 0.37) / 0.05)));
+    double altitudeFactorLow = max(0.0, min(1.0, ((altitude - 16600) / 500)));
+    double altitudeFactorHigh = max(0.0, min(1.0, ((altitude - 25000) / 500)));
+
+    // adapt thrust limits
+    if (altitude >= 25000) {
+      mct = max(clb, mct + (clb - mct) * altitudeFactorHigh);
+      toga = mct;
+    } else {
+      if (mct > toga) {
+        mct = toga + (mct - toga) * min(1.0, altitudeFactorLow + machFactor);
+        toga = mct;
+      } else {
+        toga = toga + (mct - toga) * min(1.0, altitudeFactorLow + machFactor);
+      }
+    }
+
+    // write limits ---------------------------------------------------------------------------------------------------
+    simVars->setThrustLimitIdle(idle);
+    simVars->setThrustLimitToga(toga);
+    simVars->setThrustLimitFlex(flex);
+    simVars->setThrustLimitClimb(clb);
+    simVars->setThrustLimitMct(mct);
   }
 
  public:
   /// <summary>
   /// Initialize the FADEC and Fuel model
   /// </summary>
-  void initialize() {
-    srand((int)time(0));
-
-    double engTime;
-    double fuelCenterInit = 0;
-    double fuelLeftInit = (rand() % 100) + 340;
-    double fuelRightInit = fuelLeftInit;
-    double fuelLeftAuxInit = 228;
-    double fuelRightAuxInit = fuelLeftAuxInit;
-
+  void initialize(const char* acftRegistration) {
     std::cout << "FADEC: Initializing EngineControl" << std::endl;
 
     simVars = new SimVars();
-    engTime = 0;
+    double engTime = 0;
     ambientTemp = simVars->getAmbientTemperature();
     simN2LeftPre = simVars->getN2(1);
     simN2RightPre = simVars->getN2(2);
+
+    confFilename += acftRegistration;
+    confFilename += FILENAME_FADEC_CONF_FILE_EXTENSION;
+
+    Configuration configuration = getConfigurationFromFile();
 
     // One-off Engine imbalance
     generateEngineImbalance(1);
@@ -979,23 +1142,31 @@ class EngineControl {
     simVars->setEngine2Timer(0);
 
     // Initialize Fuel Tanks
-    simVars->setFuelLeftPre(fuelLeftInit * simVars->getFuelWeightGallon());          // in LBS
-    simVars->setFuelRightPre(fuelRightInit * simVars->getFuelWeightGallon());        // in LBS
-    simVars->setFuelAuxLeftPre(fuelLeftAuxInit * simVars->getFuelWeightGallon());    // in LBS
-    simVars->setFuelAuxRightPre(fuelRightAuxInit * simVars->getFuelWeightGallon());  // in LBS
-    simVars->setFuelCenterPre(fuelCenterInit * simVars->getFuelWeightGallon());      // in LBS
+    simVars->setFuelLeftPre(configuration.fuelLeft * simVars->getFuelWeightGallon());          // in LBS
+    simVars->setFuelRightPre(configuration.fuelRight * simVars->getFuelWeightGallon());        // in LBS
+    simVars->setFuelAuxLeftPre(configuration.fuelLeftAux * simVars->getFuelWeightGallon());    // in LBS
+    simVars->setFuelAuxRightPre(configuration.fuelRightAux * simVars->getFuelWeightGallon());  // in LBS
+    simVars->setFuelCenterPre(configuration.fuelCenter * simVars->getFuelWeightGallon());      // in LBS
 
     // Initialize Pump State
     simVars->setPumpStateLeft(0);
     simVars->setPumpStateRight(0);
+
+    // Initialize Thrust Limits
+    simVars->setThrustLimitIdle(0);
+    simVars->setThrustLimitToga(0);
+    simVars->setThrustLimitFlex(0);
+    simVars->setThrustLimitClimb(0);
+    simVars->setThrustLimitMct(0);
   }
 
   /// <summary>
   /// Update cycle at deltaTime
   /// </summary>
-  void update(double deltaTime) {
+  void update(double deltaTime, double simulationTime) {
     double animationDeltaTime;
     double prevAnimationDeltaTime;
+    double simN1highest = 0;
 
     // animationDeltaTimes being used to detect a Paused situation
     prevAnimationDeltaTime = animationDeltaTime;
@@ -1007,8 +1178,20 @@ class EngineControl {
     ambientPressure = simVars->getAmbientPressure();
     simOnGround = simVars->getSimOnGround();
     imbalance = simVars->getEngineImbalance();
+    packs = 0;
+    nai = 0;
+    wai = 0;
 
-    generateIdleParameters(pressAltitude, ambientTemp, ambientPressure);
+    // Obtain Bleed Variables
+    if (simVars->getPacksState1() > 0.5 || simVars->getPacksState2() > 0.5) {
+      packs = 1;
+    }
+    if (simVars->getNAI(1) > 0.5 || simVars->getNAI(2) > 0.5) {
+      nai = 1;
+    }
+    wai = simVars->getWAI();
+
+    generateIdleParameters(pressAltitude, mach, ambientTemp, ambientPressure);
 
     // Timer timer;
     for (engine = 1; engine <= 2; engine++) {
@@ -1049,16 +1232,68 @@ class EngineControl {
           updateEGT(engine, imbalance, deltaTime, simOnGround, engineState, simCN1, cFbwFF, mach, pressAltitude, ambientTemp);
           // updateOil(engine, imbalance, thrust, simN2, deltaN2, deltaTime, ambientTemp);
       }
+
+      // set highest N1 from either engine
+      simN1highest = max(simN1highest, simN1);
     }
 
     // If Development State is 1, UI Payload will be enabled
     if (simVars->getDeveloperState() == 0)
       checkPayload();
+
     updateFuel(deltaTime);
+
+    updateThrustLimits(simulationTime, pressAltitude, ambientTemp, ambientPressure, mach, simN1highest, packs, nai, wai);
     // timer.elapsed();
   }
 
   void terminate() {}
+
+  Configuration getConfigurationFromFile() {
+    Configuration configuration;
+    mINI::INIStructure stInitStructure;
+
+    mINI::INIFile iniFile(confFilename);
+
+    if (!iniFile.read(stInitStructure)) {
+      std::cout << "EngineControl: failed to read configuration file " << confFilename << " due to error \"" << strerror(errno)
+                << "\" -> use default main/aux/center: " << configuration.fuelLeft << "/" << configuration.fuelLeftAux << "/"
+                << configuration.fuelCenter << std::endl;
+    } else {
+      configuration = loadConfiguration(stInitStructure);
+    }
+
+    return configuration;
+  }
+
+  Configuration loadConfiguration(const mINI::INIStructure& structure) {
+    return {
+        mINI::INITypeConversion::getDouble(structure, CONFIGURATION_SECTION_FUEL, CONFIGURATION_SECTION_FUEL_CENTER_QUANTITY, 0),
+        mINI::INITypeConversion::getDouble(structure, CONFIGURATION_SECTION_FUEL, CONFIGURATION_SECTION_FUEL_LEFT_QUANTITY, 400.0),
+        mINI::INITypeConversion::getDouble(structure, CONFIGURATION_SECTION_FUEL, CONFIGURATION_SECTION_FUEL_RIGHT_QUANTITY, 400.0),
+        mINI::INITypeConversion::getDouble(structure, CONFIGURATION_SECTION_FUEL, CONFIGURATION_SECTION_FUEL_LEFT_AUX_QUANTITY, 228.0),
+        mINI::INITypeConversion::getDouble(structure, CONFIGURATION_SECTION_FUEL, CONFIGURATION_SECTION_FUEL_RIGHT_AUX_QUANTITY, 228.0),
+    };
+  }
+
+  void saveFuelInConfiguration(Configuration configuration) {
+    mINI::INIStructure stInitStructure;
+    mINI::INIFile iniFile(confFilename);
+
+    // Do not check a possible error since the file may not exist yet
+    iniFile.read(stInitStructure);
+
+    stInitStructure[CONFIGURATION_SECTION_FUEL][CONFIGURATION_SECTION_FUEL_CENTER_QUANTITY] = std::to_string(configuration.fuelCenter);
+    stInitStructure[CONFIGURATION_SECTION_FUEL][CONFIGURATION_SECTION_FUEL_LEFT_QUANTITY] = std::to_string(configuration.fuelLeft);
+    stInitStructure[CONFIGURATION_SECTION_FUEL][CONFIGURATION_SECTION_FUEL_RIGHT_QUANTITY] = std::to_string(configuration.fuelRight);
+    stInitStructure[CONFIGURATION_SECTION_FUEL][CONFIGURATION_SECTION_FUEL_LEFT_AUX_QUANTITY] = std::to_string(configuration.fuelLeftAux);
+    stInitStructure[CONFIGURATION_SECTION_FUEL][CONFIGURATION_SECTION_FUEL_RIGHT_AUX_QUANTITY] = std::to_string(configuration.fuelRightAux);
+
+    if (!iniFile.write(stInitStructure, true)) {
+      std::cout << "EngineControl: failed to write engine conf " << confFilename << " due to error \"" << strerror(errno) << "\""
+                << std::endl;
+    }
+  }
 };
 
 EngineControl EngineControlInstance;

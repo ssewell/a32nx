@@ -1,15 +1,66 @@
 use crate::{
-    f64_to_sim_connect_32k_pos, sim_connect_32k_pos_to_f64, Aspect, MsfsVariableRegistry, Variable,
+    f64_to_sim_connect_32k_pos, sim_connect_32k_pos_inv_to_f64, sim_connect_32k_pos_to_f64,
+    MsfsVariableRegistry, Variable,
 };
 use enum_dispatch::enum_dispatch;
 use msfs::sim_connect::{SimConnect, SimConnectRecv, SIMCONNECT_OBJECT_ID_USER};
+use msfs::sys;
 use std::error::Error;
 use std::time::{Duration, Instant};
 use systems::simulation::VariableIdentifier;
 
-/// Type used to configure and build an [Aspect].
+/// A concern that should be handled by the bridging layer. Examples are
+/// the handling of events which move flaps up and down, triggering of brakes, etc.
+pub(super) trait Aspect {
+    /// Attempts to read data with the given identifier.
+    /// Returns `Some` when reading was successful, `None` otherwise.
+    fn read(&mut self, _identifier: &VariableIdentifier) -> Option<f64> {
+        None
+    }
+
+    /// Attempts to write the value with the given identifier.
+    /// Returns true when the writing was successful and deemed sufficient,
+    /// false otherwise.
+    ///
+    /// Note that there may be cases where multiple types write the same data.
+    /// For such situations, after a successful write the function can return false.
+    fn write(&mut self, _identifier: &VariableIdentifier, _value: f64) -> bool {
+        false
+    }
+
+    /// Attempts to handle the given message, returning true
+    /// when the message was handled and false otherwise.
+    fn handle_message(
+        &mut self,
+        _message: &SimConnectRecv,
+        _variables: &mut MsfsVariableRegistry,
+    ) -> bool {
+        false
+    }
+
+    /// Executes before a simulation tick runs.
+    fn pre_tick(
+        &mut self,
+        _variables: &mut MsfsVariableRegistry,
+        _sim_connect: &mut SimConnect,
+        _delta: Duration,
+    ) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+
+    /// Executes after a simulation tick ran.
+    fn post_tick(
+        &mut self,
+        _variables: &mut MsfsVariableRegistry,
+        _sim_connect: &mut SimConnect,
+    ) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+}
+
+/// Type used to configure an aspect of the connectivity between MSFS and the simulation.
 ///
-/// It should be noted that the resulting [Aspect] executes its tasks in the order in which they
+/// It should be noted that the resulting aspect executes its tasks in the order in which they
 /// were declared. Declaration order is important when one action depends on another action.
 /// When e.g. a variable that is mapped should then be written to an event, be sure to
 /// declare the mapping before the event writing.
@@ -34,9 +85,7 @@ impl<'a, 'b> MsfsAspectBuilder<'a, 'b> {
     }
 
     pub fn build(self) -> MsfsAspect {
-        let aspect = MsfsAspect::new(self.message_handlers, self.actions);
-
-        aspect
+        MsfsAspect::new(self.message_handlers, self.actions)
     }
 
     /// Initialise the variable with the given value.
@@ -132,7 +181,7 @@ impl<'a, 'b> MsfsAspectBuilder<'a, 'b> {
         mapping: EventToVariableMapping,
         target: Variable,
         configure_options: fn(EventToVariableOptions) -> EventToVariableOptions,
-    ) -> Result<u32, Box<dyn Error>> {
+    ) -> Result<sys::DWORD, Box<dyn Error>> {
         Self::precondition_not_aircraft_variable(&target);
 
         let target = self.variables.register(&target);
@@ -178,7 +227,7 @@ impl<'a, 'b> MsfsAspectBuilder<'a, 'b> {
         input: Variable,
         mapping: VariableToEventMapping,
         write_on: VariableToEventWriteOn,
-        event_id: u32,
+        event_id: sys::DWORD,
     ) {
         let input = self.variables.register(&input);
 
@@ -188,18 +237,18 @@ impl<'a, 'b> MsfsAspectBuilder<'a, 'b> {
         ));
     }
 
-    /// Execute the given function whenever the observed variable's value changes.
+    /// Execute the given function whenever any of the observed variable values changes.
     pub fn on_change(
         &mut self,
         execute_on: ExecuteOn,
-        observed: Variable,
-        func: Box<dyn Fn(f64, f64) -> ()>,
+        observed: Vec<Variable>,
+        func: Box<dyn Fn(&[f64], &[f64])>,
     ) {
-        let observed = self.variables.register(&observed);
-        let starting_value = self.variables.read(&observed);
+        let observed = self.variables.register_many(&observed);
+        let starting_values = self.variables.read_many(&observed);
 
         self.actions.push((
-            OnChange::new(observed, starting_value, func).into(),
+            OnChange::new(observed, starting_values, func).into(),
             execute_on,
         ));
     }
@@ -338,11 +387,7 @@ impl ExecutableVariableAction for Map {
         _: &mut SimConnect,
         variables: &mut MsfsVariableRegistry,
     ) -> Result<(), Box<dyn Error>> {
-        let value = match variables.read(&self.input_variable_identifier) {
-            Some(value) => value,
-            None => panic!("Attempted to map a variable which is unavailable."),
-        };
-
+        let value = variables.read(&self.input_variable_identifier);
         variables.write(&self.output_variable_identifier, (self.func)(value));
 
         Ok(())
@@ -392,11 +437,8 @@ impl ExecutableVariableAction for MapMany {
         _: &mut SimConnect,
         variables: &mut MsfsVariableRegistry,
     ) -> Result<(), Box<dyn Error>> {
-        let values: Vec<f64> = variables
-            .read_many(&self.input_variable_identifiers)
-            .iter()
-            .map(|&x| x.unwrap())
-            .collect();
+        let values: Vec<f64> = variables.read_many(&self.input_variable_identifiers);
+
         let result = (self.func)(&values);
         variables.write(&self.output_variable_identifier, result);
 
@@ -435,12 +477,11 @@ impl ExecutableVariableAction for Reduce {
         _: &mut SimConnect,
         variables: &mut MsfsVariableRegistry,
     ) -> Result<(), Box<dyn Error>> {
-        let values: Vec<f64> = variables
+        let result = variables
             .read_many(&self.input_variable_identifiers)
-            .iter()
-            .map(|&x| x.unwrap())
-            .collect();
-        let result = values.into_iter().fold(self.init, self.func);
+            .into_iter()
+            .fold(self.init, self.func);
+
         variables.write(&self.output_variable_identifier, result);
 
         Ok(())
@@ -455,9 +496,30 @@ pub fn min(accumulator: f64, item: f64) -> f64 {
     accumulator.min(item)
 }
 
+#[derive(PartialEq)]
+pub enum ObjectWrite {
+    Ignore,
+    ToSim,
+}
+impl ObjectWrite {
+    pub fn on(condition: bool) -> Self {
+        if condition {
+            Self::ToSim
+        } else {
+            Self::Ignore
+        }
+    }
+}
+impl Default for ObjectWrite {
+    fn default() -> Self {
+        Self::ToSim
+    }
+}
+
+/// Write function provides the output to know if the object will be written to sim or not
 pub trait VariablesToObject {
     fn variables(&self) -> Vec<Variable>;
-    fn write(&mut self, values: Vec<f64>);
+    fn write(&mut self, values: Vec<f64>) -> ObjectWrite;
     fn set_data_on_sim_object(&self, sim_connect: &mut SimConnect) -> Result<(), Box<dyn Error>>;
 }
 
@@ -484,18 +546,12 @@ impl ExecutableVariableAction for ToObject {
         let values: Vec<f64> = self
             .variables
             .iter()
-            .map(
-                |variable_identifier| match variables.read(variable_identifier) {
-                    Some(value) => value,
-                    None => {
-                        panic!("Attempted to access variables which are unavailable.")
-                    }
-                },
-            )
+            .map(|variable_identifier| variables.read(variable_identifier))
             .collect();
 
-        self.target_object.write(values);
-        self.target_object.set_data_on_sim_object(sim_connect)?;
+        if self.target_object.write(values) == ObjectWrite::ToSim {
+            self.target_object.set_data_on_sim_object(sim_connect)?;
+        }
 
         Ok(())
     }
@@ -641,15 +697,18 @@ pub enum EventToVariableMapping {
     /// When the event occurs, sets the variable to the given value.
     Value(f64),
 
-    /// Maps the event data from a u32 to an f64 without any further processing.
+    /// Maps the event data from a sys::DWORD to an [f64] without any further processing.
     EventDataRaw,
 
-    /// Maps the event data from a 32k position to an f64.
+    /// Maps the event data from a 32k position to an [f64].
     EventData32kPosition,
+
+    /// Maps the event data from a 32k position to an [f64] and inverts it.
+    EventData32kPositionInverted,
 
     /// When the event occurs, calls the function with event data and sets
     /// the variable to the returned value.
-    EventDataToValue(fn(u32) -> f64),
+    EventDataToValue(fn(sys::DWORD) -> f64),
 
     /// When the event occurs, calls the function with the current variable value and
     /// sets the variable to the returned value.
@@ -657,7 +716,7 @@ pub enum EventToVariableMapping {
 
     /// When the event occurs, calls the function with event data and the current
     /// variable value and sets the variable to the returned value.
-    EventDataAndCurrentValueToValue(fn(u32, f64) -> f64),
+    EventDataAndCurrentValueToValue(fn(sys::DWORD, f64) -> f64),
 
     /// Converts the event occurrence to a value which increases and decreases
     /// by the given factors.
@@ -677,7 +736,7 @@ trait HandleMessages {
 }
 
 struct EventToVariable {
-    event_id: u32,
+    event_id: sys::DWORD,
     event_handled_before_tick: bool,
     target: VariableIdentifier,
     mapping: EventToVariableMapping,
@@ -717,14 +776,15 @@ impl EventToVariable {
             EventToVariableMapping::Value(value) => value,
             EventToVariableMapping::EventDataRaw => e.data() as f64,
             EventToVariableMapping::EventData32kPosition => sim_connect_32k_pos_to_f64(e.data()),
+            EventToVariableMapping::EventData32kPositionInverted => {
+                sim_connect_32k_pos_inv_to_f64(e.data())
+            }
             EventToVariableMapping::EventDataToValue(func) => func(e.data()),
-            EventToVariableMapping::CurrentValueToValue(func) => {
-                func(variables.read(&self.target).unwrap_or(0.))
-            }
+            EventToVariableMapping::CurrentValueToValue(func) => func(variables.read(&self.target)),
             EventToVariableMapping::EventDataAndCurrentValueToValue(func) => {
-                func(e.data(), variables.read(&self.target).unwrap_or(0.))
+                func(e.data(), variables.read(&self.target))
             }
-            EventToVariableMapping::SmoothPress(..) => variables.read(&self.target).unwrap_or(0.),
+            EventToVariableMapping::SmoothPress(..) => variables.read(&self.target),
         }
     }
 
@@ -734,7 +794,7 @@ impl EventToVariable {
         variables: &mut MsfsVariableRegistry,
     ) {
         if let EventToVariableMapping::SmoothPress(press_factor, release_factor) = self.mapping {
-            let mut value = variables.read(&self.target).unwrap_or(0.);
+            let mut value = variables.read(&self.target);
             if self.event_handled_before_tick {
                 value += delta.as_secs_f64() * press_factor;
             } else {
@@ -777,10 +837,10 @@ impl HandleMessages for EventToVariable {
 #[derive(Clone, Copy)]
 /// Declares how to map the given variable value to an event value.
 pub enum VariableToEventMapping {
-    /// Maps the variable from an f64 to a u32 without any further processing.
+    /// Maps the variable from an [f64] to a sys::DWORD without any further processing.
     EventDataRaw,
 
-    /// Maps the variable from an f64 to a 32k position.
+    /// Maps the variable from an [f64] to a 32k position.
     EventData32kPosition,
 }
 
@@ -798,7 +858,7 @@ struct ToEvent {
     input: VariableIdentifier,
     mapping: VariableToEventMapping,
     write_on: VariableToEventWriteOn,
-    event_id: u32,
+    event_id: sys::DWORD,
     last_written_value: Option<f64>,
 }
 
@@ -823,7 +883,7 @@ impl ToEvent {
         input: VariableIdentifier,
         mapping: VariableToEventMapping,
         write_on: VariableToEventWriteOn,
-        event_id: u32,
+        event_id: sys::DWORD,
     ) -> Self {
         Self {
             input,
@@ -841,10 +901,14 @@ impl ExecutableVariableAction for ToEvent {
         sim_connect: &mut SimConnect,
         variables: &mut MsfsVariableRegistry,
     ) -> Result<(), Box<dyn Error>> {
-        let value = variables.read(&self.input).unwrap_or(0.);
+        let value = variables.read(&self.input);
         let should_write = match self.write_on {
             VariableToEventWriteOn::EveryTick => true,
             VariableToEventWriteOn::Change => match self.last_written_value {
+                // Allow floating point equality comparison, because we really care about the
+                // value being exactly equal and assume that the code that changes this value
+                // is equal for every simulation tick.
+                #[allow(clippy::float_cmp)]
                 Some(last_written_value) => value != last_written_value,
                 None => true,
             },
@@ -855,7 +919,7 @@ impl ExecutableVariableAction for ToEvent {
                 SIMCONNECT_OBJECT_ID_USER,
                 self.event_id,
                 match self.mapping {
-                    VariableToEventMapping::EventDataRaw => value as u32,
+                    VariableToEventMapping::EventDataRaw => value as sys::DWORD,
                     VariableToEventMapping::EventData32kPosition => {
                         f64_to_sim_connect_32k_pos(value)
                     }
@@ -869,20 +933,20 @@ impl ExecutableVariableAction for ToEvent {
 }
 
 struct OnChange {
-    observed_variable: VariableIdentifier,
-    previous_value: Option<f64>,
-    func: Box<dyn Fn(f64, f64) -> ()>,
+    observed_variables: Vec<VariableIdentifier>,
+    previous_values: Vec<f64>,
+    func: Box<dyn Fn(&[f64], &[f64])>,
 }
 
 impl OnChange {
     fn new(
-        observed_variable: VariableIdentifier,
-        starting_value: Option<f64>,
-        func: Box<dyn Fn(f64, f64) -> ()>,
+        observed_variables: Vec<VariableIdentifier>,
+        starting_values: Vec<f64>,
+        func: Box<dyn Fn(&[f64], &[f64])>,
     ) -> Self {
         Self {
-            observed_variable,
-            previous_value: starting_value,
+            observed_variables,
+            previous_values: starting_values,
             func,
         }
     }
@@ -894,15 +958,23 @@ impl ExecutableVariableAction for OnChange {
         _: &mut SimConnect,
         variables: &mut MsfsVariableRegistry,
     ) -> Result<(), Box<dyn Error>> {
-        let current = variables.read(&self.observed_variable);
+        let current_values: Vec<f64> = variables.read_many(&self.observed_variables);
 
-        if let (Some(previous), Some(current)) = (self.previous_value, current) {
-            if previous != current {
-                (self.func)(previous, current);
-            }
+        // Allow floating point equality comparison, because we really care about the
+        // value being exactly equal and assume that the code that changes this value
+        // is equal for every simulation tick.
+        #[allow(clippy::float_cmp)]
+        let has_changed = self
+            .previous_values
+            .iter()
+            .zip(&current_values)
+            .any(|(previous, current)| previous != current);
+
+        if has_changed {
+            (self.func)(&self.previous_values, &current_values);
         }
 
-        self.previous_value = current;
+        self.previous_values = current_values;
 
         Ok(())
     }

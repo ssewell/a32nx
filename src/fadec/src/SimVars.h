@@ -1,7 +1,7 @@
 #pragma once
 
 /// <summary>
-/// SimConnect data types to send Sim Updated
+/// SimConnect data types to send to Sim Updated
 /// </summary>
 enum DataTypesID {
   PayloadStation1,
@@ -24,11 +24,16 @@ enum DataTypesID {
   StartCN2Left,
   StartCN2Right,
   SimulationDataTypeId,
+  AcftInfo,
 };
 
 struct SimulationData {
   double simulationTime;
   double simulationRate;
+};
+
+struct SimulationDataLivery {
+  char atc_id[32] = "";
 };
 
 /// <summary>
@@ -103,10 +108,14 @@ class SimVars {
   ENUM TotalWeight = get_aircraft_var_enum("TOTAL WEIGHT");
   ENUM FuelWeightGallon = get_aircraft_var_enum("FUEL WEIGHT PER GALLON");
 
+  ENUM NacelleAntiIce = get_aircraft_var_enum("ENG ANTI ICE");
+  ENUM WingAntiIce = get_aircraft_var_enum("STRUCTURAL DEICE SWITCH");
+
   /// <summary>
   /// Collection of LVars for the A32NX
   /// </summary>
   ID DevVar;
+  ID FlexTemp;
   ID Engine1N2;
   ID Engine2N2;
   ID Engine1N1;
@@ -144,6 +153,8 @@ class SimVars {
   ID Engine2Timer;
   ID PumpStateLeft;
   ID PumpStateRight;
+  ID ConversionFactor;
+  ID PerPaxWeight;
   ID PaxRows1to6Actual;
   ID PaxRows7to13Actual;
   ID PaxRows14to21Actual;
@@ -160,11 +171,20 @@ class SimVars {
   ID CargoAftContainerDesired;
   ID CargoAftBaggageDesired;
   ID CargoAftBulkDesired;
+  ID ThrustLimitType;
+  ID ThrustLimitIdle;
+  ID ThrustLimitToga;
+  ID ThrustLimitFlex;
+  ID ThrustLimitClimb;
+  ID ThrustLimitMct;
+  ID PacksState1;
+  ID PacksState2;
 
   SimVars() { this->initializeVars(); }
 
   void initializeVars() {
     DevVar = register_named_variable("A32NX_DEVELOPER_STATE");
+    FlexTemp = register_named_variable("AIRLINER_TO_FLEX_TEMP");
     Engine1N2 = register_named_variable("A32NX_ENGINE_N2:1");
     Engine2N2 = register_named_variable("A32NX_ENGINE_N2:2");
     Engine1N1 = register_named_variable("A32NX_ENGINE_N1:1");
@@ -199,6 +219,8 @@ class SimVars {
     Engine2Timer = register_named_variable("A32NX_ENGINE_TIMER:2");
     PumpStateLeft = register_named_variable("A32NX_PUMP_STATE:1");
     PumpStateRight = register_named_variable("A32NX_PUMP_STATE:2");
+    ConversionFactor = register_named_variable("A32NX_EFB_UNIT_CONVERSION_FACTOR");
+    PerPaxWeight = register_named_variable("A32NX_WB_PER_PAX_WEIGHT");
     PaxRows1to6Actual = register_named_variable("A32NX_PAX_TOTAL_ROWS_1_6");
     PaxRows7to13Actual = register_named_variable("A32NX_PAX_TOTAL_ROWS_7_13");
     PaxRows14to21Actual = register_named_variable("A32NX_PAX_TOTAL_ROWS_14_21");
@@ -215,6 +237,16 @@ class SimVars {
     CargoAftContainerDesired = register_named_variable("A32NX_CARGO_AFT_CONTAINER_DESIRED");
     CargoAftBaggageDesired = register_named_variable("A32NX_CARGO_AFT_BAGGAGE_DESIRED");
     CargoAftBulkDesired = register_named_variable("A32NX_CARGO_AFT_BULK_LOOSE_DESIRED");
+
+    ThrustLimitType = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_TYPE");
+    ThrustLimitIdle = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_IDLE");
+    ThrustLimitToga = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_TOGA");
+    ThrustLimitFlex = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_FLX");
+    ThrustLimitClimb = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_CLB");
+    ThrustLimitMct = register_named_variable("A32NX_AUTOTHRUST_THRUST_LIMIT_MCT");
+
+    PacksState1 = register_named_variable("A32NX_COND_PACK_FLOW_VALVE_1_IS_OPEN");
+    PacksState2 = register_named_variable("A32NX_COND_PACK_FLOW_VALVE_2_IS_OPEN");
 
     this->setDeveloperState(0);
     this->setEngine1N2(0);
@@ -249,6 +281,11 @@ class SimVars {
     this->setEngine2Timer(0);
     this->setPumpStateLeft(0);
     this->setPumpStateRight(0);
+    this->setThrustLimitIdle(0);
+    this->setThrustLimitToga(0);
+    this->setThrustLimitFlex(0);
+    this->setThrustLimitClimb(0);
+    this->setThrustLimitMct(0);
 
     m_Units = new Units();
   }
@@ -287,9 +324,15 @@ class SimVars {
   void setEngine2Timer(FLOAT64 value) { set_named_variable_value(Engine2Timer, value); }
   void setPumpStateLeft(FLOAT64 value) { set_named_variable_value(PumpStateLeft, value); }
   void setPumpStateRight(FLOAT64 value) { set_named_variable_value(PumpStateRight, value); }
+  void setThrustLimitIdle(FLOAT64 value) { set_named_variable_value(ThrustLimitIdle, value); }
+  void setThrustLimitToga(FLOAT64 value) { set_named_variable_value(ThrustLimitToga, value); }
+  void setThrustLimitFlex(FLOAT64 value) { set_named_variable_value(ThrustLimitFlex, value); }
+  void setThrustLimitClimb(FLOAT64 value) { set_named_variable_value(ThrustLimitClimb, value); }
+  void setThrustLimitMct(FLOAT64 value) { set_named_variable_value(ThrustLimitMct, value); }
 
   // Collection of SimVar/LVar 'get' Functions
   FLOAT64 getDeveloperState() { return get_named_variable_value(DevVar); }
+  FLOAT64 getFlexTemp() { return get_named_variable_value(FlexTemp); }
   FLOAT64 getEngine1N2() { return get_named_variable_value(Engine1N2); }
   FLOAT64 getEngine2N2() { return get_named_variable_value(Engine2N2); }
   FLOAT64 getEngine1N1() { return get_named_variable_value(Engine1N1); }
@@ -320,6 +363,8 @@ class SimVars {
   FLOAT64 getRefuelStartedByUser() { return get_named_variable_value(RefuelStartedByUser); }
   FLOAT64 getPumpStateLeft() { return get_named_variable_value(PumpStateLeft); }
   FLOAT64 getPumpStateRight() { return get_named_variable_value(PumpStateRight); }
+  FLOAT64 getPerPaxWeight() { return get_named_variable_value(PerPaxWeight); }
+  FLOAT64 getConversionFactor() { return get_named_variable_value(ConversionFactor); }
   FLOAT64 getPaxRows1to6Actual() { return get_named_variable_value(PaxRows1to6Actual); }
   FLOAT64 getPaxRows7to13Actual() { return get_named_variable_value(PaxRows7to13Actual); }
   FLOAT64 getPaxRows14to21Actual() { return get_named_variable_value(PaxRows14to21Actual); }
@@ -336,6 +381,10 @@ class SimVars {
   FLOAT64 getCargoAftContainerDesired() { return get_named_variable_value(CargoAftContainerDesired); }
   FLOAT64 getCargoAftBaggageDesired() { return get_named_variable_value(CargoAftBaggageDesired); }
   FLOAT64 getCargoAftBulkDesired() { return get_named_variable_value(CargoAftBulkDesired); }
+  FLOAT64 getPacksState1() { return get_named_variable_value(PacksState1); }
+  FLOAT64 getPacksState2() { return get_named_variable_value(PacksState2); }
+  FLOAT64 getThrustLimitType() { return get_named_variable_value(ThrustLimitType); }
+
   FLOAT64 getCN1(int index) { return aircraft_varget(CorrectedN1, m_Units->Percent, index); }
   FLOAT64 getCN2(int index) { return aircraft_varget(CorrectedN2, m_Units->Percent, index); }
   FLOAT64 getN1(int index) { return aircraft_varget(N1, m_Units->Percent, index); }
@@ -376,4 +425,6 @@ class SimVars {
   FLOAT64 getEngineIgniter(int index) { return aircraft_varget(EngineIgniter, m_Units->Number, index); }
   FLOAT64 getEngineCombustion(int index) { return aircraft_varget(EngineCombustion, m_Units->Bool, index); }
   FLOAT64 getAnimDeltaTime() { return aircraft_varget(animDeltaTime, m_Units->Seconds, 0); }
+  FLOAT64 getNAI(int index) { return aircraft_varget(NacelleAntiIce, m_Units->Bool, index); }
+  FLOAT64 getWAI() { return aircraft_varget(WingAntiIce, m_Units->Bool, 0); }
 };
