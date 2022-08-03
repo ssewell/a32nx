@@ -53,9 +53,8 @@
 
 .fullscreen .screen {
   left: 0;
-  top: -31px;
   width: 100%;
-  transform: scaleX(1.2);
+  transform: scaleX(1.35);
 }
 
 .label {
@@ -89,7 +88,7 @@
 }
 
 .line {
-    height: 5.9%;
+    height: 5.5%;
     margin: 0;
     white-space: pre;
 }
@@ -105,14 +104,14 @@
 
 .line-left {
     position: absolute;
-    left: -4%;
+    left: 4.2%;
     width: 100%;
     text-align: left;
 }
 
 .line-right {
     position: absolute;
-    right: -4%;
+    right: 4.2%;
     width: 100%;
     text-align: right;
 }
