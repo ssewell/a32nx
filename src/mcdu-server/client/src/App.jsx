@@ -1,9 +1,10 @@
 import './App.css';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { McduScreen } from './McduScreen';
 import { McduButtons } from './McduButtons';
 import { WebsocketContext } from './WebsocketContext';
+import { MapKey } from './MapKey';
 
 function App() {
     const [fullscreen, setFullscreen] = useState(window.location.href.endsWith('fullscreen') || window.location.href.endsWith('43'));
@@ -60,6 +61,23 @@ function App() {
             }
         }
     }, [lastMessage]);
+
+    // Key event handling
+    const pressKey = useCallback((event) => {
+        const mcduKey = MapKey(event);
+        console.log(`Key -> command = ${event.key} -> event:${mcduKey}`);
+        sendMessage(`event:${mcduKey}`);
+    }, []);
+
+    const releaseKey = useCallback((event) => {
+        console.log(`Released key ${event.key}`);
+    }, []);
+
+    useEffect(() => {
+        console.log('Configuring key events...');
+        document.addEventListener('keydown', pressKey);
+        document.addEventListener('keyup', releaseKey);
+    }, []);
 
     let backgroundImageUrl = 'mcdu-a32nx.png';
     if (dark) {
